@@ -1,6 +1,6 @@
 This is free and unencumbered software released into the public domain.
 
-As a courtesy, the author would ~appreciate~ the retention of 
+As a courtesy, the author would appreciate the retention of 
 the Copyright Notice found in the first lines of the scripts/software.
 
 Anyone is free to copy, modify, publish, use, compile, sell, or
