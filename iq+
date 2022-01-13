@@ -1,22 +1,22 @@
 #!/bin/sh
-# iq+ - Extended version of the iq calculator with added functions
+# IQ+/iq+ - Extended version of the iq calculator with added functions
+# 'iq' is a precision decimal calculator for the shell
 
-# Copyright Gilbert Ashley 9 January 2022
+# Copyright Gilbert Ashley 13 January 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
-# List of functions included here: pow, nroot, logx, exp, ipow, epow
-# Back-end functions: fpow, nrt_solv, smplfy, exp_z, getE
+# Public functions included here: pow, nroot, logx, exp, ipow, epow
+# Back-end functions: fpow, nrt_solv, exp_z, getE
 # Miscellaneous functions: factorial, gcf, getP, getPhi
 
-# removed is_num
-# fpow - streamlined method slightly
-# standardize help usage
-# restore use of 'src=1' when sourcing iq
+# pow - use e^x method -base must less than 4.0
+# pow - old calculation method still in place, but disabled
+# smplfy - removed
 
 # disable some style checks and un-helpful suggestions
 # shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2120,SC2154,SC2123
 
-iqplusversion=1.71
+iqplusversion=1.72
 defprec=${defprec:-5}
 
 # set some constants - 'e' 'pi' 'phi'
@@ -29,12 +29,15 @@ PHI=1.61803398874989484820458683436
 phi=1.61803398874
 
 # pow - raises a decimal number to a given power (3.14 ^-4.12)
-# depends on: 'mul' 'ipow/epow' 'smplfy' 'nroot' 'div'
-# exponents can be simple, mixed and/or negative, like: 2.36 ^ -4.62
+# depends on: 'mul' 'ipow' 'epow' 'div'
 pow_help() {
 echo "   'pow' requires 2 inputs: 'pow [-s?] base [^] exponent'
+    Example usage: 'pow -s5 3.141592 ^ 6' for:(3.141592^6)
+    Example usage: 'pow -s8 12.141592 ^ -6' for:(12.141592^-6)
+    Fractional exponents are supported where 'base' < 4.0
+    Accuracy is ~12 places but increases as 'base' nears zero.
     Example usage: 'pow -s5 3.14 ^ -4.12' for:(3.14^-4.12)
-    Fractional exponents >3 digits (x^2.3754) are not recommended." 
+    " 
 }
 pow() { scale_pow=$defprec
     case $1 in -s*) scale_pow=${1#*-s} ; shift ;; ''|-h) pow_help >&2 ; return 1 ;;esac
@@ -69,25 +72,69 @@ pow() { scale_pow=$defprec
         -1.0) div -s$scale_pow  1 / $pbaseneg$pbase ; return ;;
     esac
     
-    # estimate a useful internal scale for pow as there are several intermediate steps
-    pmed_scale=$(( (scale_pow * 18) / 10 ))
-    case $pexp_int in 
-        0) pres=1.0 ;;     # exponent is less than 1, so do nothing here
-        1) pres=$pbase_int'.'$pbasefrac ;;
-        2) pres=$( mul -s$pmed_scale $pbase_int'.'$pbasefrac  $pbase_int'.'$pbasefrac) ;;
-        *) pres=$( ipow -s$pmed_scale $pbase_int'.'$pbasefrac $pexp_int ) ;;
+    case $pexpfrac in 
+        0)  # if exponent is integer, use ipow/epow
+            pmed_scale=$(( (scale_pow * 12) / 10 ))
+            case $pexp_int in 
+                1) pres=$pbase_int'.'$pbasefrac ;; # cant get here
+                2) pres=$( mul -s$pmed_scale $pbase_int'.'$pbasefrac  $pbase_int'.'$pbasefrac ) ;;
+                *) pres=$( ipow -s$pmed_scale $pbase_int'.'$pbasefrac $pexp_int ) ;;
+            esac
+        ;; 
+        *)  # if exponent is non-integer and base<4 use e^x method
+            # a^x = e^(x(ln(a))
+            if [ $pbase_int -lt 4 ] ; then
+                pmed_scale=$((scale_pow+3+pbase_int))
+                plog=$( logx -s$pmed_scale n $pbase )
+                pprod=$( mul -s$pmed_scale $pexp $plog )
+                pres=$( exp -s$((scale_pow+2)) $pprod )
+            else
+                # this works better than ever, but still slow, so disabled
+                # backend improvements in logx/nroot could still make it usable
+                # for base>4, use a real calculation
+                echo "-->pow: base '$pbase_int.$pbasefrac' out of range" >&2 
+                pow_help >&2 
+                return 1
+                
+                pmed_scale=$(( (scale_pow * 18) / 10 ))
+                # get the result of the exponent integer
+                pres=$( ipow -s$pmed_scale $pbase_int'.'$pbasefrac $pexp_int )
+                # sorry, we truncate exponent fraction to max 2 places
+                case $pexpfrac in 
+                    ?) nom=$pexpfrac ;;
+                    ??) nom=${pexpfrac%"${pexpfrac#*??}"*} ;;
+                    #*) echo "-->pow: exponents' fraction '.$pexpfrac' out of range" >&2 
+                    #    pow_help >&2 ; return 1 ;;
+                esac
+                # establish and reduce the arguments to nroot
+                denom=100 
+                case $nom in 
+                    ?1|?3|?7|?9)
+                        case $nom in 0*) nom=${nom#*?} ;; esac 
+                    ;; 
+                    1|3|7|9) denom=10 ;; ?) denom=5 nom=$((nom/2)) ;;
+                    *) 
+                        case $nom in 0*) nom=${nom#*?} ;; esac
+                        for simpl in 8 5 4 2 5 4 2 ;do
+                            if [ $(( $nom % $simpl )) -eq 0 ] && [  $(( $denom % $simpl )) -eq 0 ] ; then
+                                nom=$(( $nom / $simpl )) ; denom=$(( $denom / $simpl ))
+                            fi
+                        done 
+                    ;;
+                esac
+                
+                # calculate the root, then the power
+                case $nom in
+                    1)  nth_root=$( nroot -s$pmed_scale $pbase_int.$pbasefrac $denom )
+                        pres=$( mul -s$pmed_scale $pres $nth_root ) ;;
+                    *)  nth_root=$( nroot -s$pmed_scale $pbase_int.$pbasefrac $denom )
+                        nth=$( ipow -s$pmed_scale $nth_root $nom )
+                        pres=$( mul -s$pmed_scale $pres $nth ) ;;
+                esac
+            fi
+        ;;
     esac
-    # handle fractional exponents
-    if [ "${pexpfrac}" != 0 ] ; then
-        simple_frac=$(smplfy '.'$pexpfrac)
-        nom=${simple_frac%/*} denom=${simple_frac#*/}
-        nth_root=$( nroot -s$pmed_scale $pbase_int.$pbasefrac $denom )
-        case $nom in
-            1) pres=$( mul -s$pmed_scale $pres $nth_root ) ;;
-            *)  nth=$( ipow -s$pmed_scale $nth_root $nom )
-                pres=$( mul -s$pmed_scale $pres $nth ) ;;
-        esac
-    fi
+    
     # if the exponent is negative, invert the result
     case $pexpneg in '-') pres=$( div -s$pmed_scale 1 / $pres ) ;;esac
     # truncate or trim to scale
@@ -96,6 +143,7 @@ pow() { scale_pow=$defprec
         echo $pbaseneg${pres%.*}'.'${pfrac:-0} ;; 
     esac
     #pbaseneg='' pexpneg=''
+
 } ## pow
 # scale_pow= pbase= pexp= pbaseneg= pexpneg= pbase_int= pbasefrac= i_scale= pmed_scale=
 # pres= simple_frac nom= denom= nth_root= nth= pfrac=
@@ -438,7 +486,7 @@ echo "    'exp' usage: 'exp [-s?] num1'
     'e^x' - raises Euler's number 'e' to a given power 'x' (e^x),
     Example usage: 'exp -s15 3.6' returns: '36.598234443677978'
     Example usage: 'exp -s8 1.134' returns: '3.10806392'
-    Accurate to ~12 places where X<19.0."
+    Accurate to ~12 places where X<19.0"
 }
 exp() { escale=$defprec
     case $1 in -s*) escale=${1#*-s} ; shift ;; ''|-h) exp_help >&2 ; return 1 ;;esac
@@ -581,38 +629,6 @@ nrt_solv() { case $1 in -s*) nthrtsprec=${1#*-s} ; shift ;; *) nthrtsprec=$defpr
 } ## nrt_solv
 # nthrtsprec= goal_nth= goal= goal_int= answ_int= col= answ_size= this_nth= this_product= signal= answ_frac= nthrtrunc=
 
-# smplfy - backend function used by pow
-# depends on: 'div'
-# used by 'pow'
-smplfy() { 
-    case $1 in *?.*) echo "->smplfy: Only fractions allowed" >&2 ; return 1 ;; 
-        .?*) Nom=${1#*.} ;; *) Nom=${1} ;;
-    esac
-    scale_sf=${2:-$defprec}
-    while : ;do case $Nom in *'0') Nom=${Nom%?*} ;; *) break ;;esac ;done # strip any trailing zeros
-    Denom_size=$(( ${#Nom} + 1 ))  Denom=1
-    while [ ${#Denom} -lt $Denom_size ] ; do Denom=$Denom'0' ; done
-    # if there are leading zeros in the frac, strip them from front while stripping back of Denom
-    while : ;do case $Nom in '0'*) Nom=${Nom#*?} Denom=${Denom%?*} ;; *) break ;;esac ;done
-    if [ $Denom_size -lt 19 ] ; then
-        for sim_try in 8 5 4 2 ;do
-            if [ $(( $Nom % $sim_try )) -eq 0 ] && [  $(( $Denom % $sim_try )) -eq 0 ] ; then
-                Nom=$(( $Nom / $sim_try )) ; Denom=$(( $Denom / $sim_try ))
-            fi
-        done
-    else
-        for sim_try in 25 16 8 5 4 2 ;do
-            N_test_sf=$( div -s0 $Nom % $sim_try)
-            D_test_sf=$( div -s0 $Denom % $sim_try )
-            if [ "$N_test_sf" = '0' ] && [ "$D_test_sf" = '0' ] ; then
-                 Nom=$( div -s$scale_sf $Nom / $sim_try ) Denom=$( div -s$scale_sf $Denom / $sim_try )
-            fi
-        done
-    fi
-    echo $Nom/$Denom
-} ## smplfy
-# scale_sf= Nom= Nom_size= Denom= sim_try= N_test_sf= D_test_sf=
-
 # getE - returns scaled Eulers number 'e'
 # used by: 'logx'
 # 'getE n' returns 'e' to any precision up to 30 places
@@ -623,14 +639,11 @@ getE(){ case $1 in ?*) ecnt=-2 eout='' dummy=$EE
 } ## getE
 # ecnt= eout= dummy= emsk=
 
-# e^x - an adaptation of the brilliant Pade approximation of e^x found here:
-# Xeda112358 on https://www.omnimaga.org/math-and-science/pade-expansions-for-approximating-the-exponential-function/
+# e^x - an implementation of the very fast and precise Pade approximation of e^x found here:
+# https://www.omnimaga.org/math-and-science/pade-expansions-for-approximating-the-exponential-function/
 ## y=x^2
 ## a=( (x/2) * ( 1 + (5y/156)*( 1 + (3y/550)*( 1 + (y/1512))  )  /  ( 1 + (3y/26)*( 1 + (5y/396)*( 1 + (y/450))
 ## e^x = (1+a)/(1-a)
-# as X gets smaller accuracy increases dramatically (tested to; x=0.00000002 ~80 places)
-# for x>1.4(12 places) x must be reduced
-# operations: 10X mult, 9X div, 8X add
 # depends on: 'add' 'mul' 'div'
 exp_z() { escale=$defprec
     case $1 in -s*) escale=${1#*-s} ; shift ;; ''|-h) exp_help >&2 ; return 1 ;;esac
@@ -671,6 +684,7 @@ exp_z() { escale=$defprec
     denom=$( add 1 - $A )
     div -s$escale $nom / $denom
 } ## exp_z
+# operations: 10X mult, 9X div, 8X add
 
 ### End back-end functions for pow nroot logx exp
 
@@ -719,7 +733,7 @@ getPhi(){ case $1 in ?*) pcnt=-2 pout='' dummy=$PHI
 ### End Miscellaneous functions
 
 iqXhelp() {
-echo "      IQ+/iq+ - Version:$iqversion - Copyright 2021 Gilbert Ashley
+echo "      IQ+/iq+ - Version:$iqplusversion - Copyright 2021 Gilbert Ashley
     
     iq+ is an extension of the 'iq' calculator, with these functions:
     Public functions: pow ipow epow logx nroot exp
