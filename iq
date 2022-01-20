@@ -1,7 +1,7 @@
 #!/bin/sh
 # - IQ4sh or 'iq' is a precision decimal calculator for the shell
 
-# Copyright Gilbert Ashley 16 January 2022
+# Copyright Gilbert Ashley 19 January 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
 # Operations supported: addition, subtraction, multiplication, division, modulo, 
@@ -10,18 +10,21 @@
 # To see the iq help page, run './iq -h' (or 'iq -h' if 'iq' is in your PATH)
 # See the bottom of the file for full instructions on using iq.
 
-# bnpow - use sigfig scaling for negative exponents, improve help, save one cycle
-# improve general help section
-# is_op removed, is_val renamed to is_value
+# iq is now tested under busybox 'ash' -- no changes were needed
+# added alternate execution block near end of file -see Need For Speed
+# addressed 2 shellcheck notices, so SC numbers removed
+# mul - put back capital X as operator -easier to read
+# div - further fixes to mod -removed 'r' option
 
 # disable some style checks and un-helpful suggestions
-# shellcheck disable=SC2086,SC2004,SC2295,SC2154,SC2026,SC2123
+# shellcheck disable=SC2086,SC2004,SC2295,SC2123
 
-iqversion=1.72
+iqversion=1.74
 
 # default precision if scale is not specified, otherwise 
 # division could sometimes proceed endlessly
 defprec=${defprec:-5}
+src=${src:-0}
 
 # tsst  - numeric comparison of decimal numbers using shell 'test' syntax
 # depends on: 'cmp3w'
@@ -230,8 +233,7 @@ add(){ aprec=off
 # depends on 'cmp3w' and 'add'
 # for large numbers uses a chunking method which multiplies in chunks of 9 digits
 mul_help() {
-echo "  'mul' usage: 'mul [-s?] num1 x num2'
-  The small 'x' is the only valid operator for mul.
+echo "  'mul' usage: 'mul [-s?] num1 [xX] num2'
   Example: 'mul -s4 2.340876445 x 1827.749048475' = 4278.5346
   If no scale is specified, 'mul' returns the full result."
 }
@@ -241,7 +243,7 @@ mul(){ mprec=off
     case $2 in '') mul_help >&2 ; return 1 ;;esac
     r_mul=$1 ; shift
     while [ "$1" ] ;do  
-        case $1 in x) shift ;; *'.') echo "->mul: Invalid input '$1'" >&2 ; return 1 ;; esac
+        case $1 in x|X) shift ;; *'.') echo "->mul: Invalid input '$1'" >&2 ; return 1 ;; esac
         case $1 in '') echo "->mul: Missing second input after operator x" ; return 1 ;; *) mnxt=$1 ;; esac
         case $r_mul in -*) mrsign='-' r_mul=${r_mul#*-} ;; *) mrsign='+' r_mul=${r_mul#*+} ;;esac
         case $mnxt in -*) mnxtsign='-' mnxt=${mnxt#*-} ;; *) mnxtsign='+' mnxt=${mnxt#*+} ;;esac
@@ -361,8 +363,8 @@ mul(){ mprec=off
 # depends on: 'cmp3w' 'tsst' 'add' 'mul'
 # this a one-shot function which, unlike 'add' and 'mul', doesn't accept a series of inputs
 div_help() { 
-echo "  'div' requires 3 inputs: 'div [-s?] num1 (/,%,r) num2'
-  Examples: 'div -s8 3.52 / 1.4' or 'div -s8 3.52 % 1.4' or 'div -s8 3.52 r 1.4'
+echo "  'div' requires 3 inputs: 'div [-s?] num1 (/,%) num2'
+  Examples: 'div -s8 3.52 / 1.4' or 'div -s8 3.52 % 1.4'
   If no scale is given, a default value($defprec) will be used for division."
 }
 div() { scale_div=$defprec 
@@ -370,7 +372,7 @@ div() { scale_div=$defprec
     [ "$scale_div" = 0 ] || defzero='.0'
     case $3 in '') div_help >&2 ; return 1 ;;esac
     M=$1 oprtr=$2 D=$3
-    case $oprtr in '/'|'%'|'r') : ;; *) echo "->div: Invalid operator '$oprtr'" >&2 ; return 1 ;;esac
+    case $oprtr in '/'|'%') : ;; *) echo "->div: Invalid operator '$oprtr'" >&2 ; return 1 ;;esac
     case $M in '-'*) M_sign='-' M=${M#*-} ;; *) M_sign='+' M=${M#*+} ;;esac
     case $D in '-'*) D_sign='-' D=${D#*-} ;; *) D_sign='+' D=${D#*+} ;;esac
     case "${M_sign}${D_sign}" in '++'|'--') Q_sign='+' ;; '+-'|'-+') Q_sign='-' ;;esac
@@ -405,20 +407,23 @@ div() { scale_div=$defprec
     # if mod is zero, the answer is '0'
     case $mod in '') echo 0$defzero ; return ;; esac
     
-    # if D=+-1 return sanitized M, if inputs have same absolute value, answer is '+-1'
+    # special cases
     case "${D_int:-0}"'.'"$sane_dfrac" in 1.0)
-            case $oprtr in '/') Q_out=${Q_sign#*+}${M_int:-0}
+            case $oprtr in 
+                '/') Q_out=${Q_sign#*+}${M_int:-0}
                     [ "$scale_div" != 0 ] && Q_out=$Q_out'.'$sane_mfrac ;;
-                '%') Q_out=${Q_sign#*+}${M_int:-0} ;;
-                'r') Q_out=${Q_sign#*+}${M_int:-0}'r''0.'$sane_mfrac ;; 
+                '%') Q_out='0'
+                    [ "$sane_mfrac" != 0 ] && Q_out=${M_sign#*+}'0.'$sane_mfrac ;;
             esac
-            echo $Q_out ; return ;;
+            echo $Q_out ; return 
+        ;;
         "${M_int:-0}"'.'"$sane_mfrac") 
-            case $oprtr in '/') Q_out=${Q_sign#*+}1$defzero ;;
-                '%') Q_out=${Q_sign#*+}1$defzero ;;
-                'r') Q_out=${Q_sign#*+}1'r''0.0' ;;
+            case $oprtr in 
+                '/') Q_out=${Q_sign#*+}1$defzero ;;
+                '%') Q_out='0' ;; 
             esac
-            echo $Q_out ; return ;;
+            echo $Q_out ; return 
+        ;;
     esac
     
     # pad both numbers to equal length
@@ -465,18 +470,18 @@ div() { scale_div=$defprec
         fi
     fi
     
-    # early exit if operator is %/r
-    case $oprtr in '%'|'r') 
-        mod=$( mul ${Q_sign#*+}$Q_int ${D_sign#*+}${D_int:-0}'.'$sane_dfrac )
+    # early exit if operator is %(mod)
+    case $oprtr in '%')
+        mod=$( mul ${Q_sign#*+}$Q_int x ${D_sign#*+}${D_int:-0}'.'$sane_dfrac )
         mod=$( add ${M_sign#*+}${M_int:-0}'.'$sane_mfrac - $mod )
-        [ "$Q_int" = 0 ] && Q_sign=''
-        case $oprtr in '%') echo ${Q_sign#*+}$Q_int ;; 
-            'r') echo ${Q_sign#*+}$Q_int'r'$mod ;; 
-        esac
+        case $mod in *'.0') echo ${mod%.*} ;; *) echo $mod ;;esac
         return ;;
     esac
     # or if scale is zero
-    case $scale_div in 0) [ "$Q_int" = 0 ] && echo $Q_int || echo ${Q_sign#*+}$Q_int ; return ;; esac
+    case $scale_div in 0) 
+        [ "$Q_int" = 0 ] && echo $Q_int || echo ${Q_sign#*+}$Q_int 
+        return ;; 
+    esac
     
     # calculate fraction digit-by-digit
     Q_frac=''
@@ -578,7 +583,7 @@ bnpow() { bn_scale=$defprec
 tue_nix() { : ;} ## tue_nix
 
 ## is_value is used by the execution block below
-# but are not used by any of the main functions above
+# but is not used by any of the main functions above
 # check a bunch of conditions if an input is really a value
 is_value() {
     case $1 in 
@@ -595,10 +600,10 @@ is_value() {
 
 # the general help for iq
 iqhelp() {
-echo "      IQ4sh/iq - Version:$iqversion - Copyright 2021 Gilbert Ashley
+echo "      IQ4sh/iq - Version:$iqversion - Copyright 2022 Gilbert Ashley
     
     Precision decimal calculator for the shell or for use in shell scripts.
-    Available functions and their operators: add(+-) mul(x) div(/%r) bnpow(^)
+    Available functions and their operators: add(+-) mul(xX) div(/%) bnpow(^)
     
     When running 'iq' from the command-line all functions require this format:
     'function-name number1 operator number2' like this : 'add 2.47 + 3.24'
@@ -614,22 +619,27 @@ echo "      IQ4sh/iq - Version:$iqversion - Copyright 2021 Gilbert Ashley
     To see help for a specific function, call it with the '-h' option: 'add -h',
     or with no argument: 'add '. An example of the usage line for 'add':
     'add' usage: 'add [-s?] num1 (+-) num2'
-    Items in '[]' are optional. One of any operators in '()' is required. 
+    Items in '[]' are optional. Any one of the operators in '()' is required.
+    
     Operators and values must be space-separated: 'add 2 + 3', not: 'add 2+3'
     iq does _not_ evaluate parenthetic expressions like: 'add ( 3 + (4 - 5) ) '
     Utility functions/operators: tsst(-lt,-le,-eq,-ge,-gt,-ne) cmp3w(none)
+    
+    'iq' is tested under these shells: bash zsh posh ash(busybox) dash ksh
+    Using a shell further to right in the list, will speed execution times.
     "
 }
 
-# Execution block starts here
+
+# Tutor Execution block starts here
 # If being used as a command-line calculator, execution starts here.
 # If iq has been properly 'sourced' into the shell or script, this is ignored
-if [ "$src" != "1" ] ; then
+if [ "1" != "$src" ] ; then
     # we don't get here if this file has been sourced
     # since we are going to do '$cmd "$@"' below, we make sure that only our functions
     # can be called, by eliminating the PATH and catching any absolute/relative paths
     PATH=
-    # prioritize a few friendly, evil or time-sensitive functions
+    # prioritize a few friendly, evil or time-sensitive items
     case $1 in tue_nix) tue_nix ; exit 0 ;; # people really in-the-know get priority here
         ''|-h|--help|iqhelp) iqhelp >&2 ; exit ;; # seekers,
         */*) echo " $0: Improper or dangerous input(a path): '$1'"  ; exit 1 ;; # hackers, cats
@@ -638,10 +648,11 @@ if [ "$src" != "1" ] ; then
     
     # since we are being strict, we really should uncomment this next line:
     ## case $USER in admin|root|cat) echo "--> $0: Root by any other name is still root" ; exit 1 ;; esac
-    # But, we won't. For sure, admin has read this code, root...maybe, cat wrote the code.
-    # They have all read the code and docs, they'll know that this fron-end should refuse all misuse or abuse of iq.
-    # And with this front-end, iq should never return incorrect answers or strange-looking errors from the math unit,
-    # because we also check to make sure the function names, values and operators are valid and appropriate to each other
+    # But, we won't. For sure, admin and root have read the code, and cat wrote it.
+    # With this front-end, iq should never return incorrect answers or strange-looking errors from the math unit,
+    # because we also check to make sure the function names, values and operators are valid and appropriate.
+    # This Tutor code was created to foil pranksters who might try to abuse or mis-use 'iq' syntax.
+    # If you can do without the hand-holding, see 'Need For Speed' near bottom of the file.
     
     scaletmp=''
     case $1 in
@@ -680,9 +691,9 @@ if [ "$src" != "1" ] ; then
             is_value $3 || { echo "-->$cmd: Non-numeric or mal-formed input: $3" >&2 ; exit 1 ;} # check second number
             # we still have to verify that the operator is _appropriate_ to the function being called
             case $cmd in
-                add) case $2 in [!+-]) { echo "-->$cmd: Improper operator: '$2'  -try '+' or '-'" >&2 ; exit 1 ;} ;; esac ;;
-                mul) case $2 in [!x]) { echo "-->$cmd: Improper operator: '$2'  -use 'x'" >&2 ; exit 1 ;} ;; esac ;;
-                div) case $2 in [!/%r]) { echo "-->$cmd: Improper operator: '$2'  -try '/', '%' or 'r'" >&2 ; exit 1 ;} ;; esac ;;
+                add) case $2 in [!+-]) { echo "-->$cmd: Improper operator: '$2'  -use '+' or '-'" >&2 ; exit 1 ;} ;; esac ;;
+                mul) case $2 in [!xX]) { echo "-->$cmd: Improper operator: '$2'  -use 'x'" >&2 ; exit 1 ;} ;; esac ;;
+                div) case $2 in [!/%]) { echo "-->$cmd: Improper operator: '$2'  -use '/' or '%' " >&2 ; exit 1 ;} ;; esac ;;
                 bnpow) case $2 in [!'^']) echo "-->$cmd: Improper operator: '$2'  -use '^'" >&2 ; exit 1 ;; esac ;;
             esac 
         ;;
@@ -718,13 +729,13 @@ fi
 # Or, put iq in your path, then call it like a normal program: 'iq add 23.43578 + 7234.45'
 
 # To use iq with a shell other than /bin/sh, change the first line 'shebang' 
-# of the file : '#!/bin/sh' to use 'ksh', 'dash', 'zsh', 'bash' or 'posh'.
-# If you find other shells which will run this script, please contact me.
+# of the file : '#!/bin/sh' to use 'ksh', 'dash', 'ash'(busybox), 'posh', 'zsh' or 'bash'.
+# If you find other shells which will run this script, please let me know.
 
 # For interactive use within the shell or use in other shell scripts, making
 # the file executable and changing the 'shebang' doesn't need to be done.
-# For interactive use from the CLI, source the file like this: 'src=1 . ./iq' or '. iq' if iq is in PATH
-# For use in shell scripts, put this near the top of the script: 'src=1 . ./iq' or '. iq' if iq is in PATH
+# For interactive use from the CLI, source the file like this: 'src=1 . ./iq' or 'src=1 . iq' if iq is in PATH
+# For use in shell scripts, put this near the top of the script: 'src=1 . ./iq' or 'src=1 . iq' if iq is in PATH
 # You can also temporarily add the location of 'iq' to your PATH and use it anywhere, like this:
 # PATH=path_to_iq:$PATH iq add 23.43578 + 7234.45
 
@@ -733,14 +744,37 @@ fi
 # For more detailed information, most functions have useful notes and comments in the 
 # function header. Each functions' dependencies are also listed above each function.
 
+# Fast Execution block
+# Need For Speed? Or want more flexibility? Scripting? Expert?
+# Here's an alternate Execution block which provides both.
+# To use, copy this block to just above the Tutor Execution block.
+# The Tutor block will then simply be ignored and GIGO rules apply.
+# When using this block, all operators are optional, except for 'div'.
+# And 'add' and 'mul' will handle a series: add 12.32 -5335.11 7800.98364 + -5000.242
+if [ "1" != "$src" ]  ; then
+    # we don't get here if this file has been sourced: 'src=1 . iq'
+    # since we are going to do '$cmd "$@"' below, make sure that only our functions
+    # can be called, by eliminating the PATH and catching absolute/relative paths
+    PATH=
+    case $1 in '') iqhelp >&2 ; exit ;;
+        */*) echo "$0: Improper or dangerous input(a path or command): '$1'" ; exit 1 ;;
+    esac
+    # this the only place iq ever executes something and should only
+    # recognize its' own functions. In the functions, command-sustitution is
+    # used extensively, but only to run other iq functions.
+    cmd=$1 ; shift
+    $cmd "$@" 
+    exit $? 
+    # exit status for command-line use like: 'iq tsst 1111 -gt 1110 && echo greater'
+fi
+
 ### Error Messages 
-# When running iq from the command-line, garbage inputs should always get thrown out.
-# Otherwise, error-handling is left to the shell and the garbage-in=garbage-out.
+# When running iq with the Fast Execution block, error-handling is left to the shell and GIGO rules
 # Here are some possible error messages from the shell itself, and their cause:
-# iq[?]: shift: 1: bad number       #cause--> this shouldn't be happening and you should contact me
 # iq: line ?: ? : arithmetic syntax error   #cause--> non-numeric characters in input
 # iq: 546: ls: not found      # cause--> user/cat is mis-typing function names, or trying to exploit us
 # iq: 82: [: Illegal number: +11/bin/ls00 # cause--> by now cat is furiously trying to get root
 # iq: 142: arithmetic expression: division by zero: "1/bin/ls0+100000020+0" # cause--> user...
 # iq: 142: arithmetic expression: expecting EOF: "1login0+1000050+0" # cause--> cat tries again... time for a nap
-# this one actually comes from iq itself, since we were watching the cat the whole time:
+
+# This project began April 2, 2020
