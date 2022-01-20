@@ -1,27 +1,27 @@
 #!/bin/sh
-# IQ+/iq+ - Extended version of the iq calculator with added functions
+# IQ+/iq+ - Extended version of the 'iq' calculator with added functions
 # 'iq' is a precision decimal calculator for the shell
 
-# Copyright Gilbert Ashley 16 January 2022
+# Copyright Gilbert Ashley 19 January 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
 # Public functions included here: pow, nroot, logx, exp, ipow, epow
 # Back-end functions: fpow, nrt_solv, exp_z, getConst
-# Miscellaneous functions: factorial, gcf, getP, getPhi
+# Miscellaneous functions: factorial, gcf, dec2frac
 
-# Execution block - add lines to source trig and ai functions for debugging, testing or use
-# replace getE, getP and getPHI with getConst and moved constants near that
-# ipow - simplify scaling calculation with more conservative scale
-# ipow/epow - disable negative bases, use 7-digit log
-# ipow/epow - pre-load out_mp & save 1 cycle
-# logx - redirect NAN to stderr
-# nrt_solv - use smaller fpow_scale
+# iq+ is now tested under the busybox 'ash' applet -- no changes were needed
+# put back if $src... in execution block, for uniform sourcing of iq and iq+ into other scripts
+# minor changes to help and comments
+# addressed 2 shellcheck notices, so SC numbers removed
+# dec2frac - added this re-write of smplfy
+# add ln10 to getConst -could be used by exp
 
 # disable some style checks and un-helpful suggestions
-# shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2120,SC2154,SC2123
+# shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2123
 
-iqplusversion=1.73
+iqplusversion=1.74
 defprec=${defprec:-5}
+src=${src:-0}
 
 # pow - raises a decimal number to a given power (3.14 ^-4.12)
 # depends on: 'mul' 'ipow' 'epow' 'div'
@@ -278,7 +278,7 @@ epow() { fstprec=$defprec   # normal scaling             # sigfig scaling
         [ ${#dummy} -gt $fst_scale ] && dummy=${dummy%???????*}
         msk1=${dummy#*?} out_pm=${dummy%$msk1*}
         while [ ${#msk1} -gt $fstprec ] ; do msk1=${msk1%?*} ; done
-        echo $epowneg$out_pm'.'${msk1:-0}'e'$E
+        echo $out_pm'.'${msk1:-0}'e'$E
     else
         case $E in 
             -*) cnt_p=0 pad='' E_abs=${E#*-}
@@ -311,7 +311,7 @@ epow() { fstprec=$defprec   # normal scaling             # sigfig scaling
                 out_pm=$out_pm'.'${out_frac:-0}
             ;;
         esac
-        [ 1 = "$is_int" ] && echo $epowneg${out_pm%.*} || echo $epowneg$out_pm
+        [ 1 = "$is_int" ] && echo ${out_pm%.*} || echo $out_pm
     fi
 } ## epow
 # fstprec= SigScale= E_note= base= exp= fst_scale= zeros= dummy= bplog= E= base_int= base_int_size= out_pm=
@@ -457,7 +457,6 @@ logx() { scale_lx=$defprec
     while [ $lxcnt -lt $its ] ;do
         acu=$( mul -s$e_scale $acu $ratio )    acu=$( mul -s$e_scale $acu $ratio )
         tsst ${acu#*-} -eq 0 && break
-        #sub_total=$( div -s$e_scale $acu / $dvsr_series ) total=$( add $total $sub_total )
         sub_total=$( div -s$scale_lx $acu / $dvsr_series ) total=$( add $total $sub_total )
         lxcnt=$((lxcnt+1)) dvsr_series=$((dvsr_series+2))
     done
@@ -466,7 +465,7 @@ logx() { scale_lx=$defprec
     # print or convert the output according to the base
     case $base in e|n) echo $lxout ;;
         10) mul -s$scale_lx $lxout 0.434294481903251 ;; # 2.302585092994045
-        2) mul -s$scale_lx $lxout 1.442695040888862 ;; # 0.693147180559994   #3.32192809489 
+        2) mul -s$scale_lx $lxout 1.442695040888862 ;; # 0.693147180559994
     esac
 } ## logx
 # scale_lx= base= x= mask= frac= e_scale= rank= lxE= its= d= z= x_m= x_p= 
@@ -632,6 +631,8 @@ nrt_solv() { case $1 in -s*) nthrtsprec=${1#*-s} ; shift ;; *) nthrtsprec=$defpr
 # 'getConst e' alone returns 'e' to 11 places
 EE=2.718281828459045235360287471352
 ee=2.71828182845
+LN10=2.302585092994045684017991454684
+ln10=2.30258509299
 PI=3.141592653589793238462643383279
 pi=3.14159265358
 PHI=1.618033988749894848204586834365
@@ -639,11 +640,13 @@ phi=1.61803398874
 getConst(){ 
     case $1 in e|E) dummy=$EE short=$ee ;; 
         pi|PI) dummy=$PI short=$pi ;; 
-        phi|PHI) dummy=$PHI short=$phi ;; 
+        phi|PHI) dummy=$PHI short=$phi ;;
+        ln10|LN10) dummy=$LN10 short=$ln10 ;;
         *) echo "-->getConst: Unknown Constant '$1'" >&2 ; return 1 ;; 
     esac
-    [ $2 -gt 30 ] && { echo "-->getConst: Constant length must be <=30" >&2 ; return 1 ;}
+    #[ $2 -gt 30 ] && { echo "-->getConst: Constant length must be <=30" >&2 ; return 1 ;}
     case $2 in ?*) pcnt=-2 pout='' 
+        [ $2 -gt 30 ] && { echo "-->getConst: Constant length must be <=30" >&2 ; return 1 ;}
         while [ $pcnt -lt $2 ] ;do 
             pmsk=${dummy#*?} cout=$cout${dummy%$pmsk*} dummy=$pmsk pcnt=$((pcnt+1))
         done
@@ -709,15 +712,18 @@ exp_z() { escale=$defprec
 # depends on: 'mul'
 # Example usage: 'factorial 5' returns: '120'
 factorial(){ case $1 in -s*) shift ;;esac   # scale is unused and ignored
-    case $1 in *.*) echo "-->factorial: Only integer inputs are allowed." >&2 ; return 1 ;;esac
+    case $1 in '') echo "-->factorial: Requires 1 integer input" >&2 ; return 1 ;;
+        *.*) echo "-->factorial: Only integer inputs are allowed." >&2 ; return 1 ;;
+    esac
     fact_out=$1 fact=$((fact_out-1))
-    while [ $fact -gt 1 ] ;do fact_out=$( mul -s0 $fact_out x $fact ) fact=$((fact-1)) ; done
+    while [ $fact -gt 1 ] ;do fact_out=$( mul -s0 $fact_out x $fact ) fact=$((fact-1)) ;done
     echo $fact_out
 } ## factorial  # fact_out= fact=
 
 # gcf - find the Greatest Common Factor of two integer numbers
 # depends on: 'div' 'mul' 'add'
 gcf() {  case $1 in -s*) shift ;;esac   # scale is unused and ignored
+    case $2 in '') echo "-->gcf: Requires 2 integer inputs" >&2 ; return 1 ;;esac
     case $1"$2" in *.*) echo "-->gcf: Only integer inputs allowed" >&2 ; return 1 ;;esac
     gcf_n1=$1 gcf_n2=$2
     while [ $gcf_n2 -ne 0 ] ; do
@@ -729,13 +735,64 @@ gcf() {  case $1 in -s*) shift ;;esac   # scale is unused and ignored
     echo $gcf_n1
 } ## gcf  # gcf_n1= gcf_n2= gcf_q= gcf_p= gcf_pp= gcf_new2
 
+# dec2frac - backend function used by pow
+# depends on: 'div'
+dec2frac() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
+    case $1 in .?*|0.?*) Nom=${1#*.} ;;
+        '') echo "-->dec2frac: Accepts a decimal fraction input: .12781 or 0.13889914" >&2 ; return ;;
+        *) echo "-->dec2frac: Only fractions allowed" >&2 ; return 1 ;; 
+    esac
+    # strip any trailing zeros from the fraction
+    while : ;do case $Nom in *'0') Nom=${Nom%?*} ;; *) break ;;esac ;done
+    # if now null, it was all zeros
+    case $Nom in '') echo "0" ; return ;; esac
+    # pad up the denom to one extra digit
+    Denom_size=$(( ${#Nom} + 1 ))  Denom=1
+    while [ ${#Denom} -lt $Denom_size ] ; do Denom=$Denom'0' ;done
+    # strip any leading zeros in the frac
+    while : ;do case $Nom in '0'*) Nom=${Nom#*?} ;; *) break ;;esac ;done
+    # if number is non-divisible by 5 4 or 2, return fast
+    case $Nom in *1|*3|*7|*9) echo $Nom/$Denom ; return ;; esac
+    
+    cnt=0 runs=$(( (Denom_size/3) + 1 ))
+    if [ $Denom_size -lt 19 ] ;then
+        while [ $cnt -lt $runs ] ;do
+            cnt=$((cnt+1))
+            for sim_try in 25 16 8 5 4 2 ;do
+                if [ $(( $Nom % $sim_try )) -eq 0 ] && [  $(( $Denom % $sim_try )) -eq 0 ] ;then
+                    Nom=$(( $Nom / $sim_try )) ; Denom=$(( $Denom / $sim_try ))
+                fi
+                [  $Nom -eq 1 ] && break 2 
+            done
+            [ ${#Denom} -eq $Denom_size ] && break 1
+            Denom_size=${#Denom}
+        done
+    else
+        while [ $cnt -lt $runs ] ; do
+            cnt=$((cnt+1))
+            for sim_try in 25 16 8 5 4 2  ;do
+                N_test_sf=$( div $Nom % $sim_try)
+                D_test_sf=$( div $Denom % $sim_try )
+                if [ "$N_test_sf" = '0' ] && [ "$D_test_sf" = '0' ] ;then
+                    Nom=$( div -s0 $Nom / $sim_try ) Denom=$( div -s0 $Denom / $sim_try )
+                fi
+                [  "$Nom" = 1 ] && break 2
+            done
+            [ ${#Denom} -eq $Denom_size ] && break 1
+            Denom_size=${#Denom}
+        done
+    fi
+    echo $Nom/$Denom
+} ## dec2frac
+# Nom= Denom= Denom_size= cnt= runs= sim_try= N_test_sf= D_test_sf=
+
 ### End Miscellaneous functions
 
 iqXhelp() {
-echo "      IQ+/iq+ - Version:$iqplusversion - Copyright 2021 Gilbert Ashley
+echo "      IQ+/iq+ - Version:$iqplusversion - Copyright 2022 Gilbert Ashley
     
     iq+ is an extension of the 'iq' calculator, with these functions:
-    Public functions: pow ipow epow logx nroot exp
+    Public functions: pow logx nroot exp ipow epow 
     Solutions are given as Real Numbers in Cartesian Form.
     For help on each function, call it with no arguments or '-h':
     Example: 'iq+ logx -h' or simply 'iq+ logx'
@@ -751,26 +808,28 @@ echo "      IQ+/iq+ - Version:$iqplusversion - Copyright 2021 Gilbert Ashley
     'add 6 -3 2 + 1 + -4 - -4 = 6', but not 'add 3 --2 +-6'.
     
     The exponent operator '^' is optional with all pow functions.
+    'div' still requires one of these operators: / % 
     'logx' returns logarithms in base 2, 'e' or 10 (log2/ln/log).
     
-    The utility functions 'factorial', 'gcf' and 'is_value' have no help.
+    The functions 'factorial', 'gcf' and 'dec2frac' are self-explanatory.
     See the comments throughout the code and at the bottom, for detailed
-    information on them or any function and how to use iq/iq+.
+    information on them or any other function and how to use iq/iq+.
     
-    iq/iq+ is tested under these shells: bash zsh posh dash ksh
-    If speed is a concern, try a shell further right in the list.
-    Compared to bash, iq+ is ~3X faster on dash and ~6X faster on ksh.
+    iq/iq+ is tested under these shells: bash zsh posh ash(busybox) dash ksh
+    Using a shell further to right in the list, will speed execution times.
+    Compared to bash, iq+ is ~3X faster on dash and >6X faster on ksh.
     "
 }
 
+## Execution block
 # If 'iq' and 'iq+' are in your PATH use: 'iq+ command'
 # Or temporarily add the location of 'iq' to your PATH, like this:
 # PATH=path_to_iq:$PATH iq add 23.43578 7234.45
 # Otherwise, 'iq' and 'iq+' must be in the users' current working
 # directory and you'd then call iq+ like this: './iq+ command'
-case "${0##*/}" in iq+*) 
-    # we don't get here if this file has been sourced: '. this_file'
-    # iq+ needs to source iq for the main functions
+if [ "1" != "$src" ]  ; then
+    # we don't get here if this file has been sourced: 'src=1 . iq+'
+    # iq+ needs to source 'iq' for the main functions
     # for debugging, also handle filenames that have a version number 
     case $0 in 
         ./iq+) src=1 . ./iq 
@@ -796,9 +855,9 @@ case "${0##*/}" in iq+*)
     # used extensively, but only to run other iq/iq+ functions.
     cmd=$1 ; shift
     $cmd "$@" 
-    exit $? # exit status for command-line use like: 'iq+ tsst 1111 -gt 1110 && echo greater'
-   ;;
-esac
+    exit $? 
+    # exit status for command-line use like: 'iq+ tsst 1111 -gt 1110 && echo greater'
+fi
 # end of code
 
 # If you want to use these functions and the normal functions from iq in 
