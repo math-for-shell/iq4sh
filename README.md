@@ -15,5 +15,5 @@ plus 'mod' with two output formats, and exponentiation of integer inputs.
 pow, log/log2/ln, nthroot, exp and others.
 
 iq and iq+ are written entirely in posix-shell language, and do not call
-external programs. They are tested under: bash, zsh, posh, dash and ksh.
+external programs. They are tested under: bash, zsh, posh, ash(busybox), dash and ksh.
 
