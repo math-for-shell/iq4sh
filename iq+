@@ -1,39 +1,38 @@
 #!/bin/sh
-# IQ+/iq+ - Extended version of the 'iq' calculator with added functions
-# 'iq' is a precision decimal calculator for the shell
+# IQ+/iq+ - Extended version of the iq4sh/iq calculator
 
-# Copyright Gilbert Ashley 19 January 2022
+# Copyright Gilbert Ashley 25 January 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
-# Public functions included here: pow, nroot, logx, exp, ipow, epow
-# Back-end functions: fpow, nrt_solv, exp_z, getConst
-# Miscellaneous functions: factorial, gcf, dec2frac
+# Public functions: pow, nroot, logx, exp, sin, cos, tan, ipow, epow
+# Back-end functions: fpow, nrt_solv, exp_z, getConst, dgrs2rdns
+# Miscellaneous functions: factorial, gcf, dec2frac, rdns2dgrs
 
-# iq+ is now tested under the busybox 'ash' applet -- no changes were needed
-# put back if $src... in execution block, for uniform sourcing of iq and iq+ into other scripts
-# minor changes to help and comments
-# addressed 2 shellcheck notices, so SC numbers removed
-# dec2frac - added this re-write of smplfy
-# add ln10 to getConst -could be used by exp
+# sin, cos, tan - added new functions with help functions
+# these are all accurate to 6 places with any input
+# dgrs2rdns - needed by sin
+# rdns2dgrs - unused, but included for completeness
 
 # disable some style checks and un-helpful suggestions
 # shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2123
 
-iqplusversion=1.74
+iqplusversion=1.75
+
+# default precision 
 defprec=${defprec:-5}
-src=${src:-0}
 
 # pow - raises a decimal number to a given power (3.14 ^-4.12)
 # depends on: 'mul' 'ipow' 'epow' 'div'
 pow_help() {
-echo "   'pow' requires 2 inputs: 'pow [-s?] base [^] exponent'
-    Example usage: 'pow -s9 3.141592 ^ 6' = 961.387993507
-    Example usage: 'pow -s12 12.141592 ^ -6' = 0.000000312137
+echo "   'pow' usage: 'pow [-s?] base [^] exponent'
     
-    Fractional exponents are supported, where 'base' < 4.0.
-    Example usage: 'pow -s8 3.14 ^ -4.123558' = 0.00893062
-    Accuracy is ~12 places but increases as 'base' nears zero.
-    Example usage: 'pow -s15 0.618 ^ 7.385' = 0.028605522741231
+    Example: 'pow -s9 3.141592 ^ 6' = 961.387993507
+    Example: 'pow -s12 12.141592 ^ -6' = 0.000000312137
+    
+    Decimal exponents are supported, if 'base' < 4.0
+    Example: 'pow -s11 3.14 ^ -4.123558' = 0.00893062336
+    Accuracy is ~11 places but increases as 'base' nears zero
+    Example: 'pow -s15 0.618 ^ 7.385' = 0.028605522741231
     " 
 }
 pow() { scale_pow=$defprec
@@ -85,12 +84,13 @@ pow() { scale_pow=$defprec
                 pprod=$( mul -s$pmed_scale $pexp $plog )
                 pres=$( exp -s$((scale_pow+2)) $pprod )
             else
-                # for base>4, use a real calculation
-                # this works but still very slow, and range-limited, so disabled
-                # backend improvements in logx/nroot could still make it usable
+                # for base>4, we could use a long, slow, real calculation
+                # but it's simply too slow when running under 'bash' or 'zsh'
+                # if you have ksh, dash or all the time in the world,
+                # you could try commenting the folowing 2 lines...
                 echo "-->pow: base '$pbase_int.$pbasefrac' out of range" >&2 
-                pow_help >&2 
-                return 1
+                pow_help >&2 ; return 1
+                
                 # sorry, we truncate exponent fraction to max 2 places
                 case $pexpfrac in 
                     ?) nom=$pexpfrac ;; *) nom=${pexpfrac%"${pexpfrac#*??}"*} ;;
@@ -108,7 +108,7 @@ pow() { scale_pow=$defprec
                         done 
                     ;;
                 esac
-                
+                # use a generous intermediate scale
                 pmed_scale=$((scale_pow * 2))
                 # get the result of the exponent integer
                 pres=$( ipow -s$pmed_scale $pbase_int'.'$pbasefrac $pexp_int )
@@ -142,11 +142,13 @@ pow() { scale_pow=$defprec
 # ipow - raises a decimal number to an integer power
 # depends on: 'epow' 'logx' 'mul' 'div'
 ipow_help() {
-echo "  'ipow' requires 2 inputs: 'ipow [-s?] base [^] exponent'
-    Example usage: 'ipow -s20 3.14 ^ -4' = 0.01028682632761480208
-    Example usage: 'ipow -s9  9.35234 16' = 3425504893420641.057301958
-    The base must be a positive number, either integer or mixed.
-    Exponents can be negative or positive, but must be integers."
+echo "   'ipow' usage: 'ipow [-s?] base [^] exponent'
+    
+    'base' must be a positive number, integer or decimal.
+    Exponents can be negative or positive, but must be integers.
+    Example: 'ipow -s20 3.14 ^ -4' = 0.01028682632761480208
+    Example: 'ipow -s9  9.35234 16' = 3425504893420641.057301958
+    "
 }
 ipow(){ mp_prec=$defprec
     case $1 in -s*) mp_prec=${1#*-s} ; shift ;; ''|-h) ipow_help >&2 ; return 1 ;;  esac
@@ -199,16 +201,18 @@ ipow(){ mp_prec=$defprec
 # used by ipow for bases X<1
 # example: epow -e6 0.0105 ^ 1000000000 = 1.174730e-1978810701 
 epow_help()  {
-echo "    'epow' requires 2 inputs: 'epow [-s?,-S,-e?] base [^] integer-exponent' 
-    Raises a decimal number to an integer power, with answers in three forms:
-    normally-scaled outputs, significant digits or scientific notation.
+echo "    'epow' usage: 'epow [-s?,-S,-e?] base [^] exponent' 
+    
+    Both 'base' and 'exponent' must be positive numbers.
+    'base' can be an integer or decimal, 'exponent' must be integer.
+    'epow' returns powers with answers in three forms: normally
+    scaled outputs, significant digits or scientific notation.
     Output format is controlled with 3 scaling options: -s? -S? or -e?
     
     Example usage for normal scaling: 'epow -s9 0.14 7' = 0.000001054
     Example for significant digits: 'epow -S9 0.14 7' = 0.00000105413504
     Example for scientific notation: 'epow -e9 0.14 7' = 1.05413504e-6
-    Another: 'epow -e35 0.01437 15' = 2.30065512760421600804469570253465808e-28
-    And: 'epow -e17 178.874 32' = 1.20645465336778227e72
+    Example for scientific notation: 'epow -e12 42.818 7' = 2.638667359224e11
     "
 }
 epow() { fstprec=$defprec   # normal scaling             # sigfig scaling
@@ -320,10 +324,14 @@ epow() { fstprec=$defprec   # normal scaling             # sigfig scaling
 # nroot - find the 'n-th' root of a number
 # depends on: 'nrt_solv' 'div'
 nroot_help() {
-echo "   'nroot' requires 2 inputs: 'nroot [-s?] num1 num2'
-    Example usage: 'nroot -s6 4.3 10' for: 10th root of 4.3
-    Returns the Nth root of an input value, where 'Nth' is an integer.
-    Example usage: 'nroot -s6 4.3 10' for: 10th root of 4.3" 
+echo "   'nroot' usage: 'nroot [-s?] Number Nth'
+    
+    'Number' must be a positive integer or decimal
+    'Nth' must be a positive integer
+    Example: 'nroot -s6 4.3 10' for: 10th root of 4.3
+    Example: 'nroot -s8 43.225 2' for: sqrt of 43.225
+    Example: 'nroot -s12 2 2' = 1.414213562373
+    "
 }
 nroot() { scale_nrt=$defprec
     case $1 in -s*) scale_nrt=${1#*-s} ; shift ;; ''|-h) nroot_help >&2 ; return 1  ;;esac
@@ -406,10 +414,12 @@ nroot() { scale_nrt=$defprec
 # uses a power series for ln(x) and then converts to base 2 or 10 if needed
 # ln(x) = 2{ (x-1/x+1) + 1/3(x-1/x+1)^3 + 1/5(x-1/x+1)^5 + ...}
 logx_help() {
-echo "    'logx' requires 2 inputs: 'logx [-s?] base num1'
-    Example usage: 'logx -s8 10 6.7' for: log(6.7)
-    Example usage: 'logx -s7 n 6.7' for: ln(6.7)
-    Example usage: 'logx -s7 2 6.7' for: log2(6.7)
+echo "    'logx' usage: 'logx [-s?] base num1'
+    
+    Calculates logarithms to ~11 places
+    Example: 'logx -s8 10 6.7' for: log(6.7)
+    Example: 'logx -s7 n 6.7' for: ln(6.7)
+    Example: 'logx -s7 2 6.7' for: log2(6.7)
    "
 }
 logx() { scale_lx=$defprec
@@ -476,11 +486,13 @@ logx() { scale_lx=$defprec
 # precision is tuned to provide ~12 places for a wide range of inputs,
 # where X<19 -tested down to ~X>0.00000002
 exp_help() {
-echo "    'exp' usage: 'exp [-s?] num1'
+echo "    'exp' usage: 'exp [-s?] exponent'
+    
     'e^x' - raises Euler's number 'e' to a given power 'x' (e^x),
-    Example usage: 'exp -s15 3.6' returns: '36.598234443677978'
-    Example usage: 'exp -s8 1.134' returns: '3.10806392'
-    Accurate to ~12 places where X<19.0"
+    Example: 'exp -s15 3.6' returns: '36.598234443677978'
+    Example: 'exp -s8 1.134' returns: '3.10806392'
+    Accurate to ~12 places where X<19.0
+    "
 }
 exp() { escale=$defprec
     case $1 in -s*) escale=${1#*-s} ; shift ;; ''|-h) exp_help >&2 ; return 1 ;;esac
@@ -502,7 +514,7 @@ exp() { escale=$defprec
         case $expneg in '-') div -s$escale 1 / $expout ;; *) echo $expout ;; esac
         
         # first draft was maybe a little easier to read:
-            # using 2.0 & 1.2 (instead of 1.1) raises domain and lowers precision
+            # using 2.0 & 1.2 (instead of 1.1) raises range and lowers precision
             #tsst $expx -gt 2.0
             #expn=0
             #while tsst $expx -gt 1.2 ; do
@@ -707,6 +719,227 @@ exp_z() { escale=$defprec
 
 ### End back-end functions for pow nroot logx exp
 
+### Trigonometry functions
+# sin - Pade approximation of sin
+# depends on: 'dgrs2rdns' 'tsst' 'mul' 'add' 'div'
+##num[x_] = 12671/4363920*x^5 - 2363/18183*x^3 + x;
+##den[x_] = 1 + 445/12122*x^2 + 601/872784*x^4 + 121/16662240*x^6;
+##si[x_] = num[x]/den[x]
+##6-digit precision @ range [-pi/2,pi/2] radians
+# This Pade approximation is fast and accurate up to 6 places for any x
+sin_help() {
+echo "    'sin' usage: 'sin [-s?] angle'
+    
+    'angle' can be integer or decimal, in degrees 
+    Accuracy: 6 places at any 'angle'
+    Example usage: 'sin -s6 91.35' = 0.999767
+    Example usage: 'sin -s6 29.4567' = 0.491765
+    "
+}
+sin(){ scale_sn=$defprec
+    case $1 in -s*) scale_sn=${1#*-s} ; shift ;; ''|'-h') sin_help >&2 ; return ;; esac 
+    # raise intermediate scale to retain accuracy
+    scale_sin=$((scale_sn+2))
+    # get the input
+    x_sin=$1
+    # store and remove signs
+    case $x_sin in '-'*) sin_neg='-' x_sin=${x_sin#*-} ;; 
+        '+'*) sin_neg='+' x_sin=${x_sin#*+} ;; 
+        *) sin_neg='+' ;; 
+    esac
+    # reduce large x to 360 or less
+    while tsst $x_sin -gt 360 ; do
+        x_sin=$( add $x_sin - 360 )
+    done
+    # use symmetry to deduce signage
+    negintrmed='+'
+    if tsst $x_sin -gt 180 ; then
+        negintrmed='-'
+    fi
+    # determine final sign of result
+    case $sin_neg$negintrmed in '--'|'++') sin_neg= ;; '-+'|'+-') sin_neg='-' ;; esac
+    # early exit for special cases
+    case $x_sin in 
+        90|90.0) echo $sin_neg'1' ; return ;; 
+        180|180.0|360|360.0) echo '0' ; return ;;
+        270|270.0) [ "$sin_neg" = '-' ] &&  echo '-1' || echo '1' ; return ;; 
+    esac
+    # use symmetry to reduce x to <90
+    if tsst $x_sin -gt 270 ; then
+        x_sin=$( add 360 - $x_sin )
+    elif tsst $x_sin -gt 180 ; then
+        x_sin=$( add $x_sin -180 )
+    elif tsst $x_sin -gt 90 ; then
+        x_sin=$( add 180 - $x_sin )
+    fi
+    
+    # pre-calculated ratios nominator side
+    #rat1=( 12671 / 4363920 )   #rat2=( 2363 / 18183 )
+    rat1=0.0029035821004968     rat2=0.1299565528240664
+    # pre-calculated ratios denominator side
+    #rat3=( 445 / 12122 )    #rat4=( 601 / 872784 )   #rat5=( 121 / 16662240 )
+    rat3=0.0367101138426002  rat4=0.0006886010742635  rat5=0.0000072619287682
+    
+    # this approximant works in radians
+    x_sin=$( dgrs2rdns -s$scale_sin $x_sin )
+    
+    # calculate the needed powers of x from x^2 to x^6 
+    x2=$( mul -s$scale_sin $x_sin x $x_sin )
+    x3=$( mul -s$scale_sin $x2 x $x_sin )
+    x4=$( mul -s$scale_sin $x3 x $x_sin )
+    x5=$( mul -s$scale_sin $x4 x $x_sin )
+    x6=$( mul -s$scale_sin $x5 x $x_sin )
+    
+    # calculate the numerator 'num'
+    prod1=$( mul -s$scale_sin $rat1 x $x5 )
+    prod2=$( mul -s$scale_sin $rat2 x $x3 )
+    num=$( add  $prod1 - $prod2 + $x_sin )
+    
+    # calculate the denominator 'den'
+    prod3=$( mul -s$scale_sin $rat3 x $x2 )
+    prod4=$( mul -s$scale_sin $rat4 x $x4 )
+    prod5=$( mul -s$scale_sin $rat5 x $x6 )
+    den=$( add 1 + $prod3 + $prod4 + $prod5 )
+    
+    # rational result
+    r_sin=$( div -s$scale_sn $num / $den )
+    # add the final sign
+    echo $sin_neg$r_sin
+} ## sin
+## scale_sn= scale_sin= x_sin= sin_neg= negintrmed= 
+## rat1..5=  x2..6=  prod1..5=  num=  den=  r_sin=
+# operations: 11Xmul, 2Xadd, 1Xdiv(5 more if rat? are not pre-calculated)
+
+# cos - cosθ = sin(90∘−θ)
+# depends on: 'sin' 'add' 'tsst'
+# accurate to 6 places at any x
+cos_help() {
+echo "    'cos' usage: 'cos [-s?] angle'
+    
+    'angle' can be integer or decimal, in degrees 
+    Accuracy: 6 places at any 'angle'
+    Example usage: 'cos -s6 28.573' = 0.878208
+    Example usage: 'cos -s6 98.827' = -0.153451
+    "
+}
+cos(){ scale_cos=$defprec
+    case $1 in -s*) scale_cos=${1#*-s} ; shift ;; ''|'-h') cos_help >&2 ; return ;; esac 
+    x_cos=$1
+    # store and remove sign of input
+    case $x_cos in '-'*) cos_neg='-' x_cos=${x_cos#*-} ;; 
+        '+'*) cos_neg='+' x_cos=${x_cos#*+} ;; 
+        *) cos_neg='+' ;; 
+    esac
+    # use periodicitiy to reduce
+    # large x to 360 or less
+    while tsst $x_cos -gt 360 ; do
+        x_cos=$( add $x_cos - 360 )
+    done
+    # early exit for special cases
+    case $x_cos in 
+        90|90.0|270|270.0) echo '0' ; return ;; 
+        180|180.0) echo '-1' ; return ;;  
+        360|360.0) echo '1' ; return ;;
+    esac
+    # use symmetry to further reduce
+    negintrmed=''
+    if tsst $x_cos -gt 270 ; then
+        negintrmed=''
+        x_cos=$( add 360 - $x_cos )
+    elif tsst $x_cos -gt 180 ; then
+        negintrmed='-'
+        x_cos=$( add 180 - $x_cos )
+    elif tsst $x_cos -gt 90 ; then
+        negintrmed='-'
+    fi
+    # establish the final sign of output
+    case $cos_neg$negintrmed in '--'|'++') cos_neg= ;; '-+'|'+-') cos_neg='-' ;; esac
+    # get the cosine
+    cos_x=$( add 90 - ${x_cos#*-} )
+    out_cos=$( sin -s$scale_cos ${cos_x#*-} )
+    # add the final sign
+    echo $negintrmed${out_cos#*-}
+} ## cos
+## scale_cos= x_cos= cos_neg= negintrmed= cos_x= out_cos=
+
+
+# tan - tan(x) = sin(x)/cos(x)
+# depends on: 'sin' 'cos' 'div' 'tsst'
+# accurate to 6 places at any x
+tan_help() {
+echo "    'tan' usage: 'tan [-s?] angle'
+    
+    'angle' can be integer or decimal, in degrees 
+    Accuracy: 6 places for any 'angle'
+    Example usage: 'tan -s6 28.573' = 0.544606
+    Example usage: 'tan -s6 98.827' = -6.439553
+    "
+}
+tan() { scale_tan=$defprec
+    case $1 in -s*) scale_tan=${1#*-s} ; shift ;; ''|'-h') tan_help >&2 ; return ;; esac
+    x_tan=$1
+    # establish sign of input
+    case $x_tan in '-'*) tan_neg='-' x_tan=${x_tan#*-} ;; 
+        '+'*) tan_neg='+' x_tan=${x_tan#*+} ;; 
+        *) tan_neg='+' ;; 
+    esac
+    # use periodicitiy to reduce
+    # large x to 360 or less
+    while tsst $x_tan -gt 360 ; do
+        x_tan=$( add $x_tan - 360 )
+    done
+    # early exit for special cases
+    case $x_tan in 
+        90|90.0) echo ${tan_neg#*+}'inf' ; return ;; 
+        270|270.0) [ "$tan_neg" = '-' ] &&  echo 'inf' || echo '-inf' ; return ;; 
+        180|180.0|360|360.0) echo '0' ; return ;;  
+    esac
+    # use periodicitiy to reduce
+    # large x to 180 or less
+    while tsst $x_tan -gt 180 ; do
+        x_tan=$( add $x_tan - 180 )
+    done
+    # use symmetry to further reduce
+    negintrmed='+'
+    if tsst $x_tan -gt 90 ; then
+        negintrmed='-'
+    fi
+    # establish the real sign of the output
+    case $tan_neg$negintrmed in '--'|'++') tan_neg= ;; '-+'|'+-') tan_neg='-' ;; esac
+    # get the sin and cosin
+    si=$( sin -s$scale_tan $x_tan )
+    co=$( cos -s$scale_tan $x_tan )
+    # and divide
+    out_tan=$( div -s$scale_tan $si / $co )
+    # add the final sign
+    echo $tan_neg${out_tan#*-}
+} ## tan
+## scale_tan= x_tan= tan_neg= negintrmed= si= co= out_tan=
+
+# dgrs2rdns - convert degrees to radians    # x(pi/180)
+# depends on: 'mul'
+# used by: 'sin'
+# accurate to ~8-10 places
+dgrs2rdns(){ scale_dg2rd=$defprec
+    case $1 in -s*) scale_dg2rd=${1#*-s} ; shift ;; 
+        ''|'-h') echo "-->dgrs2rdns: Converts Degrees to Radians" >&2 ; return 1 ;;
+    esac 
+    mul -s$scale_dg2rd $1 x 0.017453292519
+} ## dgrs2rdns
+
+# rdns2dgrs - convert radians to degrees     # x(180/pi)
+# depends on: 'mul'
+# unused, but included for completeness
+# accurate to ~8-10 places
+rdns2dgrs(){ scale_rd2dg=$defprec
+    case $1 in -s*) scale_rd2dg=${1#*-s} ; shift ;; 
+        ''|'-h') echo "-->rdns2dgrs: Converts Radians to Degrees" >&2 ; return 1 ;;
+    esac 
+    mul -s$scale_rd2dg $1 57.295779513082
+} ## rdns2dgrs
+
+### End trigonometry functions
+
 ### Miscellaneous functions currently unused elsewhere
 # factorial - returns the factorial of an integer input
 # depends on: 'mul'
@@ -735,11 +968,11 @@ gcf() {  case $1 in -s*) shift ;;esac   # scale is unused and ignored
     echo $gcf_n1
 } ## gcf  # gcf_n1= gcf_n2= gcf_q= gcf_p= gcf_pp= gcf_new2
 
-# dec2frac - backend function used by pow
+# dec2frac - convert a decimal fraction to a whole-number ratio
 # depends on: 'div'
 dec2frac() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
     case $1 in .?*|0.?*) Nom=${1#*.} ;;
-        '') echo "-->dec2frac: Accepts a decimal fraction input: .12781 or 0.13889914" >&2 ; return ;;
+        ''|'-h') echo "-->dec2frac: Requires a decimal fraction input: .12781 or 0.1388" >&2 ; return ;;
         *) echo "-->dec2frac: Only fractions allowed" >&2 ; return 1 ;; 
     esac
     # strip any trailing zeros from the fraction
@@ -789,37 +1022,38 @@ dec2frac() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
 ### End Miscellaneous functions
 
 iqXhelp() {
-echo "      IQ+/iq+ - Version:$iqplusversion - Copyright 2022 Gilbert Ashley
+echo "      IQ+ - Version $iqplusversion - Copyright 2022 Gilbert Ashley
     
-    iq+ is an extension of the 'iq' calculator, with these functions:
-    Public functions: pow logx nroot exp ipow epow 
-    Solutions are given as Real Numbers in Cartesian Form.
-    For help on each function, call it with no arguments or '-h':
+    iq+ extends the 'iq' calculator, with these functions:
+    Power-related functions:  pow  logx  nroot  exp
+    Trigonometry functions:   sin  cos   tan
+    
+    For help and examples, call with no arguments or '-h':
     Example: 'iq+ logx -h' or simply 'iq+ logx'
     
-    iq+ is best used after first understanding the usage and syntax of 'iq'.
-    For more on general 'iq' syntax and usage, run the function 'iqhelp'.
-    #Where 'iq' enforces sane inputs, iq+ does not -so GIGO rules apply.
+    iq+ usage and syntax builds on that of the 'iq' calculator
+    For more on 'iq' syntax and usage, run 'iq -h' or 'iq+ iqhelp'
+    'iq' enforces sane inputs, iq+ does not -so GIGO rules apply
     
-    When calling 'add' or 'mul' from iq+, the operators(+-x) are not required
-    and operations can be performed on a series of inputs: 'add 3 7 22.5 -4.1',
-    or 'mul 4.35678 3.4456567 3.223352'. With scale option 's?', 'add' and 'mul'
-    only truncate the final result. 'add' can understand mixed signs/ops like:
-    'add 6 -3 2 + 1 + -4 - -4 = 6', but not 'add 3 --2 +-6'.
+    From iq+, 'add' and 'mul' require no operators(+-xX), and
+    operations on multiple inputs are possible: 'add 3 22.5 -4.1'
+    or: 'mul 4.35678 3.4456567 3.223352'. 'add' understands mixed
+    signs/operators: 'add 6 -3 1 + -4 - -4' but not 'add 3 --2 +-6'
+    For series operations, 'add or 'mul' only truncate final result
     
-    The exponent operator '^' is optional with all pow functions.
-    'div' still requires one of these operators: / % 
-    'logx' returns logarithms in base 2, 'e' or 10 (log2/ln/log).
+    The exponent operator '^' is optional with pow functions
+    'div' always requires one of these operators: / % 
     
-    The functions 'factorial', 'gcf' and 'dec2frac' are self-explanatory.
-    See the comments throughout the code and at the bottom, for detailed
-    information on them or any other function and how to use iq/iq+.
+    'logx' returns logarithms in base 2, 'e' or 10 (log2/ln/log)
+    'nroot' returns the 'nth' root of a decimal number
     
-    iq/iq+ is tested under these shells: bash zsh posh ash(busybox) dash ksh
-    Using a shell further to right in the list, will speed execution times.
-    Compared to bash, iq+ is ~3X faster on dash and >6X faster on ksh.
+    Utility functions: factorial gcf dec2frac dgrs2rdns rdns2dgrs
+    Accessory functions: ipow epow 
     "
 }
+
+# default for execution block
+src=${src:-0}
 
 ## Execution block
 # If 'iq' and 'iq+' are in your PATH use: 'iq+ command'
@@ -833,17 +1067,16 @@ if [ "1" != "$src" ]  ; then
     # for debugging, also handle filenames that have a version number 
     case $0 in 
         ./iq+) src=1 . ./iq 
-            #. ./iq_trig.sh # uncomment for debugging or testing
-            #. ./iq_ai.sh # of additional iq modules
+            #. ./iq_misc.sh # uncomment for debugging or testing
+            #. ./iq_ai.sh   # of additional iq modules
         ;;
         ./iq+?*) vers=${0#*'+'} ; src=1 . ./iq$vers 
-            #. ./iq_trig$vers # uncomment for debugging or testing
-            #. ./iq_ai$vers # of additional iq modules
+            #. ./iq_misc$vers # uncomment for debugging or testing
+            #. ./iq_ai$vers   # of additional iq modules
         ;; 
         *iq+) src=1 . iq ;;
         *iq+?*) vers=${0#*'+'} ; src=1 . iq$vers ;; 
     esac
-    #cmd=$1 ; shift
     # since we are going to do '$cmd "$@"' below, make sure that only our functions
     # can be called, by eliminating the PATH and catching absolute/relative paths
     PATH=
