@@ -1,7 +1,7 @@
 #!/bin/sh
 # - IQ4sh or 'iq' is a precision decimal calculator for the shell
 
-# Copyright Gilbert Ashley 25 January 2022
+# Copyright Gilbert Ashley 29 January 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
 # Operations supported: addition, subtraction, multiplication, division, modulo, 
@@ -10,13 +10,12 @@
 # To see the iq help page, run './iq -h' (or 'iq -h' if 'iq' is in your PATH)
 # See the bottom of the file for full instructions on using iq.
 
-# bnpow -renamed to 'spow'
-# more refining of help/comments
+# syncronize with iq+
 
 # disable some style checks from shellcheck
 # shellcheck disable=SC2086,SC2004,SC2295,SC2123
 
-iqversion=1.75
+iqversion=1.76
 
 # default precision
 defprec=${defprec:-5}
@@ -695,7 +694,7 @@ if [ "1" != "$src" ] ; then
                 -s*) scaletmp=$2 ; shift 2 ;; 
                 *) shift ;; 
             esac
-            # for uniform checks, always require an operator - exactly 3 inputs (after scale, if present
+            # for uniform checks, always require an operator - exactly 3 inputs (after scale, if present)
             [ -z $3 ] && { echo "-->$cmd: 3 space-separated inputs required 'num1 operator num2'" ; exit ;}
             [ -n "$4" ] && { echo "-->$cmd: Too many arguments" ; exit 1 ;} # too many arguments
             # check first number
