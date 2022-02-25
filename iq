@@ -1,7 +1,7 @@
 #!/bin/sh
 # - IQ4sh or 'iq' is a precision decimal calculator for the shell
 
-# Copyright Gilbert Ashley 29 January 2022
+# Copyright Gilbert Ashley 25 February 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
 # Operations supported: addition, subtraction, multiplication, division, modulo, 
@@ -10,12 +10,10 @@
 # To see the iq help page, run './iq -h' (or 'iq -h' if 'iq' is in your PATH)
 # See the bottom of the file for full instructions on using iq.
 
-# syncronize with iq+
-
 # disable some style checks from shellcheck
 # shellcheck disable=SC2086,SC2004,SC2295,SC2123
 
-iqversion=1.76
+iqversion=1.77
 
 # default precision
 defprec=${defprec:-5}
@@ -23,9 +21,11 @@ defprec=${defprec:-5}
 # tsst  - numeric comparison of decimal numbers using shell 'test' syntax
 # depends on: 'cmp3w'
 tsst_help(){
-echo "  'tsst' usage: 'tsst num1 operator num2' operators: -lt -le -eq -ge -gt -ne
-  tsst returns true or false condition, for use like shell 'test' or '[' 
-  Example: 'tsst 4.22 -lt 6.3 && echo less' or 'tsst 4.22 -lt 6.3 ; echo \$?'"
+echo "  'tsst' usage: 'tsst num1 (operator) num2' 
+    Operators: -lt -le -eq -ge -gt -ne
+    tsst returns true or false condition, for use like shell 'test' or '[' 
+    Example: 'tsst 4.22 -lt 6.3 && echo less'
+    Example: 'tsst 4.22 -lt 6.3 ; echo \$?'"
 }
 tsst() { case $1 in ''|-h|-s*) tsst_help >&2 ; return 1 ;;esac
     tstret=$( cmp3w $1 $3 )
@@ -42,12 +42,13 @@ tsst() { case $1 in ''|-h|-s*) tsst_help >&2 ; return 1 ;;esac
 
 # 'cmp3w' compares 2 decimal numbers relatively, returning: '<', '=' or '>'
 # depends on: /bin/sh
+# used by: 'tsst' 'add' 'div'
 # The input-handling routine used here, is similar to that used in most other
 # functions so it's commented here, and later only where it differs from here
 cmp3w_help() { 
 echo "  'cmp3w' usage: 'cmp3w num1 num2' 
-  Numerically compares 2 decimal numbers, returns: '<' '=' or '>'
-  Example: 'cmp3w -234.57 -234.55' returns: '<' (to stdout)"
+    Relatively compares 2 decimal numbers, returns: '<' '=' or '>'
+    Example: 'cmp3w -234.57 -234.55' returns: '<' (to stdout)"
 }
 cmp3w() { case $1 in ''|-h|-s*) cmp3w_help >&2  ; return 1 ;;esac
     # separate and store the signs of both inputs
@@ -229,10 +230,10 @@ add(){ aprec=off
 # A= B= adsub= acry= admsk1= Achnk= admsk2= Bchnk= adcnt= ofrac=
 
 # mul - multiply 2 or more decimal numbers
-# depends on 'cmp3w' and 'add'
+# depends on 'add'
 # for large numbers, multiplies in chunks of 9 digits
 mul_help() {
-echo "  'mul' usage: 'mul [-s?] num1 [xX] num2'
+echo "  'mul' usage: 'mul [-s?] num1 (xX) num2'
   
     Example: 'mul 2.340876445 x 1827.74904' = 4278.5346751073628
     Example: 'mul -s4 2.340876445 X 1827.74904' = 4278.5346
@@ -365,7 +366,7 @@ mul(){ mprec=off
 # depends on: 'cmp3w' 'tsst' 'add' 'mul'
 # this a one-shot function which, unlike 'add' and 'mul', doesn't accept a series of inputs
 div_help() { 
-echo "  'div' usage: 'div [-s?] num1 (/,%) num2'
+echo "  'div' usage: 'div [-s?] num1 (/%) num2'
     
     'div' always requires an operator: / or %
     Example: 'div -s8 3.52 / 1.4' = 2.51428571
@@ -600,7 +601,7 @@ tue_nix() { : ;} ## tue_nix
 
 ## is_val is used by the execution block below
 # but is not used by any of the main functions above
-# check a bunch of conditions if an input is really a value
+# check if an input is really a value
 is_val_help(){
 echo "  'is_val' usage: 'is_val number'
   is_val checks if 'number' is a valid value 

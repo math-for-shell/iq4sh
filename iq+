@@ -1,22 +1,17 @@
 #!/bin/sh
 # IQ+/iq+ - Extended version of the iq4sh/iq calculator
 
-# Copyright Gilbert Ashley 29 January 2022
+# Copyright Gilbert Ashley 25 February 2022
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
 # Public functions: pow, nroot, logx, exp, sin, cos, tan, ipow, epow
 # Back-end functions: fpow, nrt_solv, exp_z, getConst, dgrs2rdns, sin14, cos14
 # Miscellaneous functions: factorial, gcf, dec2frac, rdns2dgrs
 
-# dgrs2rdns, rdns2dgrs - raise scale of factors from 12 to 20
-# sin, cos, tan - use twin approximations to increase accuracy
-# from 6 places to ~12-14 places
-# sin14 cos14 - new backend functions for sin cos
-
 # disable some style checks and un-helpful suggestions
 # shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2123
 
-iqplusversion=1.76
+iqplusversion=1.77
 
 # default precision 
 defprec=${defprec:-5}
