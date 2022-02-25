@@ -1,0 +1,3 @@
+ 
+iq_ai.sh is a collection of neural-network activation functions for use with iq or iq+.
+Paste them into your shell script for use. See the IQ docs for example script.
