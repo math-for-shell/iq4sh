@@ -12,7 +12,7 @@ math functionality inside the script.
 plus 'mod' with two output formats, and exponentiation of integer inputs.
 
 'iq+' is an extended version of 'iq', which adds the following operations:
-pow, log/log2/ln, nthroot, exp and others.
+pow, log/log2/ln, nthroot, exp, sin, cos, tan, atan, atan2 and others.
 
 iq and iq+ are written entirely in posix-shell language, and do not call
 external programs. They are tested under: bash, zsh, posh, ash(busybox), dash and ksh.
