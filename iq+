@@ -1,17 +1,25 @@
 #!/bin/sh
 # IQ+/iq+ - Extended version of the iq4sh/iq calculator
 
-# Copyright Gilbert Ashley 25 February 2022
+# Copyright Gilbert Ashley 2 April 2023
 # Contact: OldGringo9876@gmx.de  Subject-line: IQ4sh
 
-# Public functions: pow, nroot, logx, exp, sin, cos, tan, ipow, epow
-# Back-end functions: fpow, nrt_solv, exp_z, getConst, dgrs2rdns, sin14, cos14
-# Miscellaneous functions: factorial, gcf, dec2frac, rdns2dgrs
+# Public functions: pow, nroot, logx, exp, sin, cos, tan, atan, atan2, ipow, epow
+# Back-end functions: fpow, nrt_solv, exp_z, getConst, deg2rad, rad2deg, sin14, cos14
+# Miscellaneous functions: factorial, gcf, dec2ratio
 
 # disable some style checks and un-helpful suggestions
-# shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2123
+# shellcheck disable=SC2034,SC2086,SC2295,SC2004,SC1090,SC1091,SC2123,SC2317
 
-iqplusversion=1.77
+iqplusversion=1.78
+
+# sin cos tan - support using radians as input and fix wrong outputs
+# renamed rdns2dgrs/dgrs2rdns as rad2deg/deg2rad
+# new function - is_near_int determines if input is close to being an integer
+# new functions - 'atan' and 'atan2' calculate arctangents in degrees/radians
+# added SC2317 to shellcheck exemptions
+# getConst - added pi_2/pi_4
+# changed name of dec2frac to dec2ratio
 
 # default precision 
 defprec=${defprec:-5}
@@ -24,7 +32,7 @@ echo "   'pow' usage: 'pow [-s?] base [^] exponent'
     Example: 'pow -s9 3.141592 ^ 6' = 961.387993507
     Example: 'pow -s12 12.141592 ^ -6' = 0.000000312137
     
-    Decimal exponents are supported, if 'base' < 4.0
+    Fractional exponents are supported, if 'base' < 4.0
     Example: 'pow -s11 3.14 ^ -4.123558' = 0.00893062336
     Accuracy is ~11 places but increases as 'base' nears zero
     Example: 'pow -s15 0.618 ^ 7.385' = 0.028605522741231
@@ -640,31 +648,33 @@ nrt_solv() { case $1 in -s*) nthrtsprec=${1#*-s} ; shift ;; *) nthrtsprec=$defpr
 # 'getConst e 24' returns 'e' truncated to 24 places
 # 'getConst e' alone returns 'e' to 11 places
 EE=2.718281828459045235360287471352
-ee=2.71828182845
+ee=2.718281828459045
 LN10=2.302585092994045684017991454684
-ln10=2.30258509299
+ln10=2.302585092994045
 PI=3.141592653589793238462643383279
-pi=3.14159265358
+pi=3.141592653589793
+PI_2=1.570796326794896619231321691639
+pi_2=1.570796326794896
+PI_4=0.785398163397448309615660845819
+pi_4=0.785398163397448
 PHI=1.618033988749894848204586834365
-phi=1.61803398874
+phi=1.618033988749894
 getConst(){ 
-    case $1 in e|E) dummy=$EE short=$ee ;; 
-        pi|PI) dummy=$PI short=$pi ;; 
-        phi|PHI) dummy=$PHI short=$phi ;;
-        ln10|LN10) dummy=$LN10 short=$ln10 ;;
+    case $1 in e|E) dummy=$EE short=$ee ;; pi|PI) dummy=$PI short=$pi ;;
+        pi_2|PI_2) dummy=$PI_2 short=$pi_2 ;; pi_4|PI_4) dummy=$PI_4 short=$pi_4 ;;
+        phi|PHI) dummy=$PHI short=$phi ;; ln10|LN10) dummy=$LN10 short=$ln10 ;;
         *) echo "-->getConst: Unknown Constant '$1'" >&2 ; return 1 ;; 
     esac
-    #[ $2 -gt 30 ] && { echo "-->getConst: Constant length must be <=30" >&2 ; return 1 ;}
     case $2 in ?*) pcnt=-2 pout='' 
         [ $2 -gt 30 ] && { echo "-->getConst: Constant length must be <=30" >&2 ; return 1 ;}
         while [ $pcnt -lt $2 ] ;do 
             pmsk=${dummy#*?} cout=$cout${dummy%$pmsk*} dummy=$pmsk pcnt=$((pcnt+1))
         done
         echo $cout ;; 
-        *) echo $short ;;
+        *)  case $1 in E|P?*|L?*) echo $dummy ;; *) echo $short ;;esac;;
     esac
 } ## getConst
-# pcnt= cout= dummy= pmsk=
+# pcnt= cout= dummy= pmsk= short=
 
 # exp_z
 # depends on: 'add' 'mul' 'div'
@@ -720,197 +730,415 @@ exp_z() { escale=$defprec
 
 ### Trigonometry functions
 
-# sin - Calculate the sine of an angle
-# depends on: 'dgrs2rdns' 'sin14' 'cos14' 'tsst' 'add'
+# sin - Calculate the Sine of an angle
+# depends on: 'sin14' 'cos14' 'deg2rad' 'is_near_int' 'tsst' 'add'
 # used by 'tan'
 sin_help() {
-echo "    'sin' usage: 'sin [-s?] angle'
+echo "    'sin' usage: 'sin [-s?] [-rad -irad] angle'
     
-    'angle' can be integer or decimal, in degrees 
-    Accuracy: 12 places at any 'angle'
-    Example usage: 'sin -s6 91.35' = 0.999767
-    Example usage: 'sin -s12 29.4567' = 0.491765667756
+    Returns the Sine of an 'angle', which
+    can be in degrees (default) or in radians 
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: approximately 12 decimal places
+    Example usage: 'sin -s6 91.35' = 0.999722
+    Example usage: 'sin -s12 23.565' = 0.399789183758
+    Example usage: 'sin -s12 -rad 0.411286838232' = 0.399789183757
     "
 }
-sin(){ out_scale=$defprec
+sin(){ out_scale=$defprec inrad=0 outrad=0
     case $1 in -s*) out_scale=${1#*-s} ; shift ;; ''|'-h') sin_help >&2 ; return ;; esac 
+    # process other arguments
+    case $1 in -rad|-irad) irad=1 ; shift ;;esac
     # raise intermediate scale to retain accuracy
     scale_sin=$((out_scale+2))
     # get the input
     x_sin=$1
-    # store and remove signs
+    # remove input sign and save
     case $x_sin in '-'*) sin_neg='-' x_sin=${x_sin#*-} ;; 
-        '+'*) sin_neg='+' x_sin=${x_sin#*+} ;; 
-        *) sin_neg='+' ;; 
+        '+'*) sin_neg='' x_sin=${x_sin#*+} ;; 
     esac
-    # reduce large x to 360 or less
+    # convert input from radians, if chosen
+    if [ 1 = "$irad" ] ; then
+        x_sin=$( rad2deg -s$scale_sin  $x_sin )
+    fi
+    # reduce large x to <=360
     while tsst $x_sin -gt 360 ; do
         x_sin=$( add $x_sin - 360 )
     done
-    # use symmetry to deduce signage
-    negintrmed='+'
-    if tsst $x_sin -gt 180 ; then
-        negintrmed='-'
-    fi
-    # determine final sign of result
-    case $sin_neg$negintrmed in '--'|'++') sin_neg= ;; '-+'|'+-') sin_neg='-' ;; esac
     # early exit for special cases
     case $x_sin in 
-        90|90.0|270|270.0) echo $sin_neg'1' ; return ;;
-        30|30.0|330|330.0) echo $sin_neg'0.5' ; return ;;
-        180|180.0|360|360.0) echo '0' ; return ;; 
+        0|0.0) echo '0.0' ; return ;;
+        30|30.0) echo ${sin_neg}'0.5' ; return ;;
+        30.0*|29.9*) is_near_int -s$out_scale $x_sin && { echo ${sin_neg}'0.5' ; return; } ;;
+        330|330.0) [ '-' = "$sin_neg" ] && echo '0.5' || echo '-.5' ; return  ;;
+        330.0*|329.9*) is_near_int -s$out_scale $x_sin && 
+                           { [ '-' = "$sin_neg" ] && echo '0.5' || echo '-.5' ; return ; } ;;
+        90|90.0) echo ${sin_neg}'1.0' ; return ;;
+        90.0*|89.9*) is_near_int -s$out_scale $x_sin && { echo ${sin_neg}'0.5' ; return; } ;;
+        270|270.0) [ '-' = "$sin_neg" ] && echo '1.0' || echo '-1.0' ; return ;;
+        270.0*|269.9*) is_near_int -s$out_scale $x_sin &&
+                    { [ '-' = "$sin_neg" ] && echo '1.0' || echo '-1.0' ; return ; } ;;
+        180|180.0|360|360.0) echo '0.0' ; return ;;
+        180.0*|179.9*|360.0*|359.9*|0.0*) is_near_int -s$out_scale $x_sin && { echo '0.0' ; return; } ;;
     esac
-    # use symmetry to reduce x to <90
+    # determine final output sign
+    if tsst $x_sin -gt 180 ; then
+        [ '-' = "$sin_neg" ] && sin_neg='' || sin_neg='-'
+    fi
+    # reduce x from any quadrant to <90
     if tsst $x_sin -gt 270 ; then
         x_sin=$( add 360 - $x_sin )
     elif tsst $x_sin -gt 180 ; then
-        x_sin=$( add $x_sin -180 )
+        x_sin=$( add $x_sin - 180 )
     elif tsst $x_sin -gt 90 ; then
         x_sin=$( add 180 - $x_sin )
     fi
-    
+    # fit input to fit best range of sin14/cos14 
     if tsst $x_sin -gt 35 ; then
         x_sin=$( add 90 - $x_sin )
-        x_sin=$( dgrs2rdns -s$scale_sin $x_sin )
+        x_sin=$( deg2rad -s$scale_sin $x_sin )
         out_sin=$( cos14 -s$out_scale $x_sin )
     else
-        x_sin=$( dgrs2rdns -s$scale_sin $x_sin )
+        x_sin=$( deg2rad -s$scale_sin $x_sin )
         out_sin=$( sin14 -s$out_scale $x_sin )
     fi
     # add the final sign
     echo ${sin_neg}$out_sin
     
-} ## sin3
-## scale_sn= scale_sin= x_sin= sin_neg= negintrmed= out_scale
+} ## sin4
+## out_scale= scale_sin= x_sin= sin_neg= irad=
 
-# cos - Calculate the cosine of an angle
-# depends on: 'dgrs2rdns' 'cos14' 'sin14' 'add' 'tsst'
+# cos - Calculate the Cosine of an angle
+# depends on: 'cos14' 'sin14' 'deg2rad' 'is_near_int' 'add' 'tsst'
 # used by: 'tan'
 cos_help() {
-echo "    'cos' usage: 'cos [-s?] angle'
+echo "    'cos' usage: 'cos [-s?] [-rad -irad] angle'
     
-    'angle' can be integer or decimal, in degrees 
-    Accuracy: ~12 places at any 'angle'
+    Returns the Cosine of an 'angle', which
+    can be in degrees (default) or radians
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: approximately 12 decimal places
     Example usage: 'cos -s6 28.573' = 0.878208
     Example usage: 'cos -s12 98.827' = -0.153451510933
+    Example usage: 'cos -s8 -rad 0.7417649320' = 0.01286791
     "
 }
-cos(){ scale_cos=$defprec
-    case $1 in -s*) scale_cos=${1#*-s} ; shift ;; ''|'-h') cos_help >&2 ; return ;; esac 
+cos(){ out_scale=$defprec irad=0
+    case $1 in -s*) out_scale=${1#*-s} ; shift ;; ''|'-h') cos_help >&2 ; return ;;esac
+    # process other input options
+    case $1 in -rad|-irad) irad=1 ; shift ;;esac
+    # raise intermediate scale to retain accuracy
+    scale_cos=$((out_scale+2))
+    # get the input
     x_cos=$1
-    out_scale=$scale_cos
-    scale_cos=$((scale_cos+2))
-    
-    # store and remove sign of input
-    case $x_cos in '-'*) cos_neg='-' x_cos=${x_cos#*-} ;; 
-        '+'*) cos_neg='+' x_cos=${x_cos#*+} ;; 
-        *) cos_neg='+' ;; 
+    # remove input sign - output sign determined below
+    case $x_cos in '-'*) x_cos=${x_cos#*-} ;; 
+        '+'*) x_cos=${x_cos#*+} ;; 
     esac
-    # use periodicitiy to reduce
-    # large x to 360 or less
+    # convert input from radians, if chosen
+    if [ '1' = "$irad" ] ; then
+        x_cos=$( rad2deg -s$scale_cos  $x_cos )
+    fi
+    # reduce large x to <=360
     while tsst $x_cos -gt 360 ; do
         x_cos=$( add $x_cos - 360 )
     done
     # early exit for special cases
-    case $x_cos in 
-        60|60.0|300|300.0) echo '0.5' ; return ;;
-        120|120.0|240|240.0) echo '-0.5' ; return ;;
-        90|90.0|270|270.0) echo '0' ; return ;; 
-        180|180.0) echo '-1' ; return ;;  
-        360|360.0) echo '1' ; return ;;
+    case $x_cos in
+            60|60.0|300|300.0) echo '0.5' ; return ;;
+            60.0*|59.9*|300.0*|299.9*) is_near_int -s$out_scale $x_cos && { echo '0.5' ; return; } ;;
+            120|120.0|240|240.0) echo '-0.5' ; return ;;
+            120.0*|119.9*|240.0*|239.9*) is_near_int -s$out_scale $x_cos && { echo '-0.5' ; return; } ;; 
+            0|0.0|90|90.0|270|270.0) echo '0.0' ; return ;;
+            0.0*|90.0*|89.9*|270.0*|269.9*) is_near_int -s$out_scale $x_cos && { echo '0.0' ; return; } ;;
+            180|180.0) echo '-1.0' ; return ;;
+            180.0*|179.*) is_near_int -s$out_scale $x_cos && { echo '-1.0' ; return; } ;;
+            360|360.0) echo '1.0' ; return ;;
+            360.0*|359.9*) is_near_int -s$out_scale $x_cos && { echo '1.0' ; return; } ;;
     esac
-    
-    # use symmetry to further reduce
-    negintrmed=''
+    # determine sign and reduce x to < 90
     if tsst $x_cos -gt 270 ; then
         x_cos=$( add 360 - $x_cos )
+        cos_neg=
     elif tsst $x_cos -gt 180 ; then
-        negintrmed='-'
         x_cos=$( add $x_cos - 180 )
+        cos_neg='-'
     elif tsst $x_cos -gt 90 ; then
-        negintrmed='-'
         x_cos=$( add 180 - $x_cos )
+        cos_neg='-'
+    else
+        cos_neg=
     fi
-    
-    # establish the final sign of output
-    case $cos_neg$negintrmed in '--'|'++') cos_neg= ;; '-+'|'+-') cos_neg='-' ;; esac
-    
-    # get the cosine
+    # fit input to fit best range of cos14/sin14
     if tsst $x_cos -gt 55 ; then
         x_cos=$( add 90 - $x_cos )
-        x_cos=$( dgrs2rdns -s$scale_cos $x_cos )
+        x_cos=$( deg2rad -s$scale_cos $x_cos )
         out_cos=$( sin14 -s$out_scale $x_cos )
     else
-        x_cos=$( dgrs2rdns -s$scale_cos $x_cos )
+        x_cos=$( deg2rad -s$scale_cos $x_cos )
         out_cos=$( cos14 -s$out_scale $x_cos )
     fi
     # add the final sign
-    echo ${negintrmed}$out_cos
-} ## cos3
-## scale_cos= x_cos= cos_neg= negintrmed= cos_x= out_cos=
+    echo ${cos_neg}$out_cos
+} ## cos4
+## out_scale= scale_cos= x_cos= cos_neg= irad= out_cos=
 
 # tan - Calcualate the tangent of an angle
-# depends on: 'sin' 'cos' 'div' 'tsst' 'add'
-# accurate to ~12 digits, except near 90/270, where
-# tan 270 or 90 +-0.1 is accurate to 11-digits
-# tan 270 or 90 +-0.000001 is accurate to 1-digit 
+# depends on: 'sin' 'cos' 'is_near_int' 'rad2deg' 'div' 'tsst' 'add'
 tan_help() {
-echo "    'tan' usage: 'tan [-s?] angle'
+echo "    'tan' usage: 'tan [-s?] [-rad -irad] angle'
     
-    'angle' can be integer or decimal, in degrees 
-    Accuracy: 12 places for any 'angle', except very
-    near 90 or 270, where +-0.1 is accurate to 11-digits
-    and 270 or 90 +-0.000001 is accurate to 1-digit
+    Returns the Tangent of an 'angle', which
+    can be in degress (default) or radians
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: ~12 decimal places
     Example usage: 'tan -s6 28.573' = 0.544606
-    Example usage: 'tan -s12 98.827' = -6.439533718717
+    Example usage: 'tan -s6 0.741764' = 0.012946
+    Example usage: 'tan -s6 -rad 0.74176' = 0.015992
     "
 }
-tan() { out_scale=$defprec
+tan() { out_scale=$defprec inrad=0
     case $1 in -s*) out_scale=${1#*-s} ; shift ;; ''|'-h') tan_help >&2 ; return ;; esac
-    scale_tan=$((out_scale+4))
+    # process other input options
+    case $1 in -rad|-irad) inrad=1 ; shift ;;esac
+    # raise intermediate scale to retain accuracyfile:///home/amigo/Downloads/fp_bash/iq4sh/trig-archive/atan-002.sh
+    scale_tan=$((out_scale+2))
+    # get the input
     x_tan=$1
-    # establish sign of input
+    # remove and save sign of input
     case $x_tan in '-'*) tan_neg='-' x_tan=${x_tan#*-} ;; 
-        '+'*) tan_neg='+' x_tan=${x_tan#*+} ;; 
-        *) tan_neg='+' ;; 
+        '+'*) tan_neg='' x_tan=${x_tan#*+} ;; 
+        *) tan_neg='' ;; 
     esac
-    # use periodicitiy to reduce
-    # large x to 360 or less
+    # convert input from radians, if chosen
+    # using 'inrad' here because sin/cos use 'irad'
+    if [ '1' = "$inrad" ] ; then
+        x_tan=$( rad2deg -s$scale_tan $x_tan )
+    fi
+    # reduce large x to 360 or less
     while tsst $x_tan -gt 360 ; do
         x_tan=$( add $x_tan - 360 )
     done
     # early exit for special cases
     case $x_tan in 
-        90|90.0) echo ${tan_neg#*+}'inf' ; return ;; 
-        270|270.0) [ "$tan_neg" = '-' ] &&  echo 'inf' || echo '-inf' ; return ;; 
-        180|180.0|360|360.0) echo '0' ; return ;;  
+        90|90.0|270|270.0) echo "-->tan: NaN" >&2 ; return 1 ;;
+        90.0*|89.9*|270.0*|269.9*) is_near_int -s$out_scale $x_tan && { echo "-->tan: NaN" >&2 ; return 1 ; } ;;
+        0|0.0|180|180.0|360|360.0) echo '0.0' ; return ;;
+        0.0*|180.0*|179.9*|360.0*|359.9*) is_near_int -s$out_scale $x_tan && { echo '0.0' ; return; } ;;
     esac
-    
-    # use periodicitiy to reduce
-    # large x to 180 or less
-    while tsst $x_tan -gt 180 ; do
-        x_tan=$( add $x_tan - 180 )
-    done
-    
-    # use symmetry to further reduce
-    negintrmed='+'
-    if tsst $x_tan -gt 90 ; then
-        negintrmed='-'
+    # determine sign of output
+    if tsst $x_tan -gt 270 ; then
+        [ '-' = "$tan_neg" ] && tan_neg='' || tan_neg='-'
+    elif tsst $x_tan -gt 180 ; then
+        :
+    elif tsst $x_tan -gt 90 ; then
+        [ '-' = "$tan_neg" ] && tan_neg='' || tan_neg='-'
     fi
-    
-    # establish the real sign of the output
-    case $tan_neg$negintrmed in '--'|'++') tan_neg= ;; '-+'|'+-') tan_neg='-' ;; esac
-    
-    # get the sin and cosin
+    # get the sine and cosine
     si=$( sin -s$scale_tan $x_tan )
     co=$( cos -s$scale_tan $x_tan )
-    
-    # and divide
+    # calculate the tangent
     out_tan=$( div -s$out_scale $si / $co )
     # add the final sign
-    echo $tan_neg${out_tan#*-}
-} ## tan
-## out_scale= scale_tan= x_tan= tan_neg= negintrmed= si= co= out_tan=
+    echo ${tan_neg}${out_tan#*-}
+} ## tan2
+## out_scale= scale_tan= x_tan= tan_neg= si= co= inrad= out_tan=
+
+
+## atan - arctan reverts a tangent to an angle
+# depends on: 'rad2deg' 'is_near_int' 'add' 'mul' 'div' 'tsst'
+# used by: 'atan2'
+# pade[3/4] approximation of atan in degrees from
+# Pade_approximants_for_inverse_trigonometric_functi.pdf
+atan_help() {
+echo "    'atan' usage: 'atan [-s?] [-rad -orad] tangent'
+    
+    Returns the Arctangent or inverse of a Tangent
+    By default, outputs are in degrees
+    Use the '-rad' or '-orad' option to output radians
+    Accuracy: ~12 decimal places (more in very small x)
+    Example usage: 'atan -s6 0.544606' = 28.572976
+    Example usage: 'atan -s6 0.012946' = 0.741709
+    Example usage: 'atan -s6 -rad 0.015992' = 0.741733
+    "
+}
+atan() { out_scale=$defprec orad=0 reduc1=0 reduc2=0
+    case $1 in -s*) out_scale=${1#*-s} ; shift ;; ''|'-h') atan_help >&2 ; return ;; esac
+    # process other input options
+    case $1 in -rad|-orad) orad=1 ; shift ;;esac
+    # raise intermediate scale to retain accuracy
+    scale_tan=$((out_scale+4))
+    # pre-calculated values for pi/2, pi/4
+    half_pi=1.57079632679489661923 #1321691639
+    quarter_pi=0.78539816339744830961 #5660845819
+    # get the input
+    ax=$1
+    # remove and store negative signs
+    case $ax in '-'*) atan_neg='-' ax=${ax#*-} ;; 
+        '+'*) atan_neg='' ax=${ax#*+} ;; 
+        *) atan_neg='' ;; 
+    esac
+    # special cases for x=0
+    case $ax in 0|0.0) echo '0.0' ; return ;;
+        0.0*) is_near_int -s$out_scale $ax && { echo '0.0' ; return; } ;;
+    esac
+    # and for x=1
+    if tsst $ax -eq 1 ; then
+        [ 1 = "$orad" ] && out_atan2=$quarter_pi || out_atan2=45.0
+        add -s$out_scale ${atan_neg}$out_atan2
+        return
+    elif tsst $ax -gt 1 ; then
+        # if x>1 reduce
+        reduc1=1
+        ax=$( div -s$scale_tan 1 / $ax )
+    fi
+    # atan is not simple to accurately approximate
+    # the fast Pade approximation below only has decent precision
+    # for very small input values under ~0.1, so we reduce everything 
+    # into the range below 0.05, and add pre-calculated values using
+    # this identity: arctan (x) = arctan(c) + arctan((x - c) / (1 + x*c))
+    case $ax in
+        0.9[56789]*) c=.9499999999 ; AA=0.759762754823298411 reduc2=1 ;;
+        0.9*) c=.8999999999 ; AA=0.732815101731257973 reduc2=1 ;;
+        0.8[56789]*) c=.8499999999 ; AA=0.704494064184162564 reduc2=1 ;;
+        0.8*) c=.7999999999 ; AA=0.674740942162577054 reduc2=1 ;;
+        0.7[56789]*) c=.7499999999 ; AA=0.643501108729284387 reduc2=1 ;;
+        0.7*) c=.6999999999 ; AA=0.610725964322094523 reduc2=1 ;;
+        0.6[56789]*) c=.6499999999 ; AA=0.576375220520884911 reduc2=1 ;;
+        0.6*) c=.5999999999 ; AA=0.540419500197054744 reduc2=1 ;;
+        0.5[56789]*) c=.5499999999 ; AA=0.502843210851085396 reduc2=1 ;;
+        0.5*) c=.4999999999 ; AA=0.463647608920806116 reduc2=1 ;;
+        0.4[56789]*) c=.4499999999 ; AA=0.42285392604978063 reduc2=1 ;;
+        0.4*) c=.3999999999 ; AA=0.38050637702615799 reduc2=1 ;;
+        0.3[56789]*) c=.3499999999 ; AA=0.336674819297640322 reduc2=1 ;;
+        0.3*) c=.2999999999 ; AA=0.291456794386123973 reduc2=1 ;;
+        0.2[56789]*) c=.2499999999 ; AA=0.244978663032746507 reduc2=1 ;;
+        0.2*) c=.1999999999 ; AA=0.197395559753726912 reduc2=1 ;;
+        0.1[56789]*) c=.1499999999 ; AA=0.148889947511697739 reduc2=1 ;;
+        0.1*) c=.0999999999 ; AA=0.0996686523921521264 reduc2=1 ;;
+        0.0[56789]*) c=.0499999999 ; AA=0.049983956221921379 reduc2=1 ;;
+        # reductions below 0.05 give worse results
+        #0.0*) c=.0099999999 ; AA=0.009999666586675237 reduc2=1 ;;
+        # inputs below 0.001 yield accuracy to ~20 places without help
+        *) : ;;
+    esac
+    # squash x to under 0.05
+    case $reduc2 in 1)
+        # arctan (x) = arctan(c) + arctan((x - c) / (1 + x*c))
+        #                   A        F       B    E    D  C 
+        BB=$( add $ax - $c )
+        CC=$( mul -s$scale_tan $ax x $c)
+        DD=$( add -s$scale_tan 1 + $CC )
+        ax=$( div -s$scale_tan $BB / $DD )
+    esac
+    # Pade approximation of atan ops: 7Xmul 2Xadd 1Xdiv
+    # arctan [3/4] (x) = (55x^3+105x)/ (9x^4+90x^2+105)
+    ax2=$( mul -s$scale_tan $ax x $ax)
+    ax3=$( mul -s$scale_tan $ax2 x $ax )
+    ax4=$( mul -s$scale_tan $ax2 x $ax2 )
+    # nom
+    A=$( mul -s$scale_tan 55 x $ax3 )
+    B=$( mul -s$scale_tan 105 x $ax )
+    C=$( add -s$scale_tan $A + $B )
+    # denom
+    D=$( mul -s$scale_tan 9 x $ax4 )
+    E=$( mul -s$scale_tan 90 x $ax2 )
+    F=$( add -s$scale_tan $D + $E + 105 )
+    # result in radians
+    rdns_out=$( div -s$scale_tan $C / $F )
+    # end pade4
+    # expand second reduction, if used
+    case $reduc2 in 1)
+        rdns_out=$( add -s$scale_tan $rdns_out + $AA ) ;;
+    esac
+    # expand first reduction, if used
+    case $reduc1 in 1)
+        rdns_out=$( add -s$scale_tan $half_pi - $rdns_out )
+    esac
+    # preserve as radians if requested
+    if [ 1 = "$orad" ] ; then
+        out_atan=$( add -s$out_scale  $rdns_out )
+    else
+        out_atan=$( rad2deg -s$out_scale $rdns_out )
+    fi
+    # add the sign
+    echo ${atan_neg}${out_atan#*-}
+} ## atan
+## out_scale= orad= reduc1= reduc2= scale_tan= 
+# half_pi= quarter_pi= ax= atan_neg= ax2= ax3= ax4=
+## AA= BB= CC= DD= A= B= C= D= E= F= rdns_out= out_atan=
+
+# atan2 -  2-input-coordinate atan returns arctangent from any quadrant
+# depends on: 'atan' 'deg2rad' 'add' 'div' 'tsst'
+atan2_help() {
+echo "    'atan2' usage: 'atan2 [-s?] [-rad -orad] [-yx] X Y'
+    
+    Returns the Arctangent of a 2-coordinate position
+    'X' and 'Y' are planar (Cartesian) coordinates
+    By default, outputs are in degrees
+    Use the '-rad' or '-orad' option to output radians
+    To change input order to Y X,  use the '-yx' option
+    Accuracy: ~10 decimal places
+    Example usage: 'atan2 -s10 3.722 3.425' = 42.6203916006
+    Example usage: 'atan2 -s10 20.435 30.152' = 55.8732180030
+    Example usage: 'atan2 -s10 -orad 20.435 30.152' = 0.9751716178
+    Example usage: 'atan2 -s10 -rad -yx 30.152 20.435' = 0.9751716178
+    "
+}
+atan2() { out_scale=$defprec orad=0 use_yx=0
+    case $1 in -s*) out_scale=${1#*-s} ; shift ;; ''|'-h') atan2_help >&2 ; return ;;esac
+    # process other arguments
+    while [ $1 ] ; do
+        case $1 in -rad|-orad) orad=1 ; shift ;; -yx) use_yx=1 ; shift ;; *) break ;;esac
+    done
+    case $2 in '') echo "-->atan2: 2 input coordinates X and Y required" >&2 ; return 1 ;;esac
+    # raise intermediate scale to retain accuracy
+    atan2_scale=$((out_scale+2))
+    # get the 2 coordinates -whether 'x/y' or 'y/x'
+    case "$use_yx" in 1) ay=$1 ax=$2 ;; *) ax=$1 ay=$2 ;;esac
+    # Early exit for special cases
+    if tsst $ax -eq 0 ; then
+        # x=0
+        if tsst $ay -eq 0 ; then
+            # y=0
+            echo "-->atan2: NaN" >&2 ; return 1
+        elif tsst $ay -lt 0 ; then
+            # y<0
+            out_atan2='-'90.0
+        else
+            # y>0
+            out_atan2=90.0
+        fi
+    elif tsst $ax -gt 0 ; then
+        # x>0 is positive so result is normal atan(y/x)
+        az=$( div -s$atan2_scale $ay / $ax )
+        out_atan2=$( atan -s$atan2_scale $az )
+    else
+        # x<0
+        if tsst $ay -gt 0 ; then
+            # y>0
+            az=$( div -s$atan2_scale $ay / $ax )
+            out_atan2=$( atan -s$atan2_scale $az )
+            out_atan2=$( add $out_atan2 + 180 )
+        elif tsst $ay -lt 0 ; then
+            # y<0
+            az=$( div -s$atan2_scale $ay / $ax )
+            out_atan2=$( atan -s$atan2_scale $az )
+            out_atan2=$( add $out_atan2 - 180 )
+        else
+            # 'y=0'
+            out_atan2=180.0
+        fi
+    fi
+    # convert to radians if requested
+    if [ 1 = "$orad" ] ; then
+        out_atan2=$( deg2rad -s$out_scale $out_atan2 )
+    else
+        out_atan2=$( add -s$out_scale $out_atan2 )
+    fi
+    echo $out_atan2
+} ## atan2
+## out_scale= atan2_scale= orad= ax= ay= az= out_atan2=
 
 # cos14 - backend for sin, cos
 # depends on: 'mul' 'add'
@@ -919,7 +1147,7 @@ tan() { out_scale=$defprec
 # http://www.ganssle.com/item/approximations-for-trig-c-code.htm
 # x2 = x*x
 # cos(x) = c1 + x2(c2 + x2(c3 + x2(c4 + x2(c5 + x2(c6 + x2(c7 + x2*c8))))))
-# inputs are in radians, outputs are in degrees
+# inputs are in radians
 cos14(){ out_scale=$defprec
     case $1 in -s*) out_scale=${1#*-s} ; shift ;; esac
     x_cos=$1
@@ -961,7 +1189,7 @@ cos14(){ out_scale=$defprec
 ##num[x_] = 12671/4363920*x^5 - 2363/18183*x^3 + x;
 ##den[x_] = 1 + 445/12122*x^2 + 601/872784*x^4 + 121/16662240*x^6;
 ##si[x_] = num[x]/den[x]
-# inputs are in radians, outputs are in degrees
+# inputs are in radians
 sin14(){ out_scale=$defprec
     case $1 in -s*) out_scale=${1#*-s} ; shift ;; esac
     x_sin=$1
@@ -1004,28 +1232,43 @@ sin14(){ out_scale=$defprec
 ## rat1..5=  x2..6=  prod1..5=  num=  den=  r_sin=
 # ops 10X mul, 2X add, 1X div
 
-# dgrs2rdns - convert degrees to radians    # x(pi/180)
+# deg2rad - convert degrees to radians    # x(pi/180)
 # depends on: 'mul'
-# used by: 'sin' 'cos'
+# used by: 'sin' 'cos' 'tan' 'atan' 'atan2'
 # accurate to ~17 places
-dgrs2rdns(){ scale_dg2rd=$defprec
+deg2rad(){ scale_dg2rd=$defprec
     case $1 in -s*) scale_dg2rd=${1#*-s} ; shift ;; 
-        ''|'-h') echo "-->dgrs2rdns: Converts Degrees to Radians" >&2 ; return 1 ;;
+        ''|'-h') echo "-->deg2rad: Converts Degrees to Radians" >&2 ; return 1 ;;
     esac 
     mul -s$scale_dg2rd $1 x 0.01745329251994329576 #9236907684 88613
-    
-} ## dgrs2rdns
+} ## deg2rad
 
-# rdns2dgrs - convert radians to degrees     # x(180/pi)
+# rad2deg - convert radians to degrees     # x(180/pi)
 # depends on: 'mul'
-# unused, but included for completeness
+# used by: 'sin' 'cos' 'tan' 'atan'
 # accurate to ~15 places
-rdns2dgrs(){ scale_rd2dg=$defprec
+rad2deg(){ scale_rd2dg=$defprec
     case $1 in -s*) scale_rd2dg=${1#*-s} ; shift ;; 
-        ''|'-h') echo "-->rdns2dgrs: Converts Radians to Degrees" >&2 ; return 1 ;;
+        ''|'-h') echo "-->rad2deg: Converts Radians to Degrees" >&2 ; return 1 ;;
     esac 
     mul -s$scale_rd2dg $1 57.29577951308232087679 #815481410517
-} ## rdns2dgrs
+} ## rad2deg
+
+# is_near_int - back-end helper for sin/cos/tan/atan
+# determines if input is close to a round integer value, at scale
+# depends on: 'add' 'tsst'
+# used by: 'sin' 'cos' 'tan' 'atan'
+is_near_int() { out_scale=$defprec
+    case $1 in -s*) out_scale=${1#*-s} ; shift ;;esac
+    # truncate input to scale for checking
+    dummy=$( add -s$out_scale $1 )
+    # separate the fraction
+    dummy=${dummy#*.}
+    # if all zeros -success
+    tsst ${dummy#*.} -eq 0 && return 0
+    # if all 9's, success, otherwise fail
+    case ${dummy#*.} in *[0-8]*) return 1 ;; *) return 0 ;;esac
+} ## is_near_int # out_scale= dummy=
 
 ### End trigonometry functions
 
@@ -1058,12 +1301,12 @@ gcf() {  case $1 in -s*) shift ;;esac   # scale is unused and ignored
     echo $gcf_n1
 } ## gcf  # gcf_n1= gcf_n2= gcf_q= gcf_p= gcf_pp= gcf_new2
 
-# dec2frac - convert a decimal fraction to a whole-number ratio
+# dec2ratio - convert a decimal fraction to a whole-number ratio
 # depends on: 'div'
-dec2frac() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
+dec2ratio() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
     case $1 in .?*|0.?*) Nom=${1#*.} ;;
-        ''|'-h') echo "-->dec2frac: Requires a decimal fraction input: .12781 or 0.1388" >&2 ; return ;;
-        *) echo "-->dec2frac: Only fractions allowed" >&2 ; return 1 ;; 
+        ''|'-h') echo "-->dec2ratio: Requires a decimal fraction input: .12781 or 0.1388" >&2 ; return 1 ;;
+        *) echo "-->dec2ratio: Only fractions allowed" >&2 ; return 1 ;; 
     esac
     # strip any trailing zeros from the fraction
     while : ;do case $Nom in *'0') Nom=${Nom%?*} ;; *) break ;;esac ;done
@@ -1106,19 +1349,21 @@ dec2frac() { case $1 in -s*) shift ;;esac   # scale is unused and ignored
         done
     fi
     echo $Nom/$Denom
-} ## dec2frac
+} ## dec2ratio
 # Nom= Denom= Denom_size= cnt= runs= sim_try= N_test_sf= D_test_sf=
 
 ### End Miscellaneous functions
 
 iqXhelp() {
-echo "      IQ+ - Version $iqplusversion - Copyright 2022 Gilbert Ashley
+echo "      IQ+ - Version $iqplusversion - Copyright 2023 Gilbert Ashley
     
     iq+ extends the 'iq' calculator, with these functions:
     Power-related functions:  pow  logx  nroot  exp
-    Trigonometry functions:   sin  cos   tan
+    Trigonometry functions:   sin  cos  tan  atan  atan2
+    Utility functions: factorial gcf dec2ratio deg2rad rad2deg
+    Other functions: ipow epow 
     
-    For help and examples, call with no arguments or '-h':
+    For help and examples, call function with no argument or '-h':
     Example: 'iq+ logx -h' or simply 'iq+ logx'
     
     iq+ usage and syntax builds on that of the 'iq' calculator
@@ -1131,14 +1376,12 @@ echo "      IQ+ - Version $iqplusversion - Copyright 2022 Gilbert Ashley
     signs/operators: 'add 6 -3 1 + -4 - -4' but not 'add 3 --2 +-6'
     For series operations, 'add or 'mul' truncate only final result
     
-    The exponent operator '^' is optional with pow functions
     'div' always requires one of these operators: / % 
+    The exponent operator '^' is optional with pow functions
     
     'logx' returns logarithms in base 2, 'e' or 10 (log2/ln/log)
     'nroot' returns the 'nth' root of a decimal number
     
-    Utility functions: factorial gcf dec2frac dgrs2rdns rdns2dgrs
-    Accessory functions: ipow epow 
     "
 }
 
@@ -1170,7 +1413,7 @@ if [ "1" != "$src" ]  ; then
     # since we are going to do '$cmd "$@"' below, make sure that only our functions
     # can be called, by eliminating the PATH and catching absolute/relative paths
     PATH=
-    case $1 in '') iqXhelp >&2 ; exit ;;
+    case $1 in ''|-h) iqXhelp >&2 ; exit ;;
         */*) echo "$0: Improper or dangerous input(a path or command): '$1'" ; exit 1 ;;
     esac
     # this the only place iq+ ever executes something and should only
