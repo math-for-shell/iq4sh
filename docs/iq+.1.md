@@ -1,4 +1,4 @@
-% IQ+(1) Version 2.0 | IQ+ Advanced Calculator Documentation
+% IQ+(1) Version 2.1 | IQ+ Advanced Calculator Documentation
 
 NAME
 ====
@@ -108,35 +108,71 @@ in Scientfic Notation. Both functions work only with a positive 'base' and integ
 
 **sin** ---- Calculates the sine of an angle
 
-    Usage: 'sin [-s?] angle'
-    'angle' can be integer or decimal, in degrees
-    Accuracy: ~12 places at any 'angle'
-    Example usage: 'sin -s6 91.35' = 0.999767
-    Example usage: 'sin -s12 29.4567' = 0.491765667756
+    'sin' usage: 'sin [-s?] [-rad -irad] angle'
+    
+    Returns the Sine of an 'angle', which
+    can be in degrees (default) or in radians 
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: approximately 12 decimal places
+    Example usage: 'sin -s6 91.35' = 0.999722
+    Example usage: 'sin -s12 23.565' = 0.399789183758
+    Example usage: 'sin -s12 -rad 0.411286838232' = 0.399789183757
 
 **cos** ---- Calculates the cosine of an angle
 
-    Usage: 'cos' usage: 'cos [-s?] angle'
-    'angle' can be integer or decimal, in degrees
-    Accuracy: ~12 places at any 'angle'
+    'cos' usage: 'cos [-s?] [-rad -irad] angle'
+    
+    Returns the Cosine of an 'angle', which
+    can be in degrees (default) or radians
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: approximately 12 decimal places
     Example usage: 'cos -s6 28.573' = 0.878208
     Example usage: 'cos -s12 98.827' = -0.153451510933
+    Example usage: 'cos -s8 -rad 0.7417649320' = 0.01286791
 
 **tan** ---- Calculates the tangent of an angle
 
-    Usage: 'tan [-s?] angle'
-    'angle' can be integer or decimal, in degrees
-    Accuracy: 12 places for any 'angle', except near
-    90 or 270 degrees, where 'tan' approaches +-infinity
-    At 90/270 +-0.1, accuracy is ~11 digits
-    At 90/270 +-0.000001, accuracy is only 1 digit
+    'tan' usage: 'tan [-s?] [-rad -irad] angle'
+    
+    Returns the Tangent of an 'angle', which
+    can be in degress (default) or radians
+    Use the '-rad' or '-irad' option to input radians
+    Accuracy: ~12 decimal places
     Example usage: 'tan -s6 28.573' = 0.544606
-    Example usage: 'tan -s12 98.827' = -6.439533718717
+    Example usage: 'tan -s6 0.741764' = 0.012946
+    Example usage: 'tan -s6 -rad 0.74176' = 0.015992
 
-**dgrs2rdns and rdns2dgrs** ---- Convert degrees to/from radians  
-    Utility functions used by *sin* and *cos*  
-    Example: 'dgrs2rdns 135.724' = 2.36883  
-    Example: 'rdns2dgrs 1.6538' = 94.75576
+**atan** ---- Calculates the arctangent (inverse) of a tangent
+
+    'atan' usage: 'atan [-s?] [-rad -orad] tangent'
+    
+    Returns the Arctangent or inverse of a Tangent
+    By default, outputs are in degrees
+    Use the '-rad' or '-orad' option to output radians
+    Accuracy: ~12 decimal places (more in very small x)
+    Example usage: 'atan -s6 0.544606' = 28.572976
+    Example usage: 'atan -s6 0.012946' = 0.741709
+    Example usage: 'atan -s6 -rad 0.015992' = 0.741733
+
+**atan2** ---- Calculates the arctangent of a planar coordinate position
+
+    'atan2' usage: 'atan2 [-s?] [-rad -orad] [-yx] X Y'
+    
+    Returns the Arctangent of a 2-coordinate position
+    'X' and 'Y' are planar (Cartesian) coordinates
+    By default, outputs are in degrees
+    Use the '-rad' or '-orad' option to output radians
+    To change input order to Y X,  use the '-yx' option
+    Accuracy: ~10 decimal places
+    Example usage: 'atan2 -s10 3.722 3.425' = 42.6203916006
+    Example usage: 'atan2 -s10 20.435 30.152' = 55.8732180030
+    Example usage: 'atan2 -s10 -orad 20.435 30.152' = 0.9751716178
+    Example usage: 'atan2 -s10 -rad -yx 30.152 20.435' = 0.9751716178
+
+**deg2rad and rad2deg** ---- Convert degrees to/from radians  
+    Utility functions used by *sin* *cos* *tan* and *atan*  
+    Example: 'deg2rad 135.724' = 2.36883  
+    Example: 'rad2deg 1.6538' = 94.75576
 
 Utility Functions
 -----------------
@@ -146,9 +182,9 @@ Utility Functions
 **gcf** ---- Returns the Greatest Common Factor of 2 numbers  
     Requires 2 integer inputs  
     Example: 'gcf 123 396' = 3  
-**dec2frac** ---- Converts a Decimal Fraction into a whole-number fraction  
+**dec2ratio** ---- Converts a Decimal Fraction into a whole-number fraction  
     Requires a decimal fraction input  
-    Example: 'dec2frac 0.1388' = 347/2500
+    Example: 'dec2ratio 0.1388' = 347/2500
 
 AUTHOR
 ======

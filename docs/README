@@ -1,0 +1,7 @@
+
+These are the documents for IQ4sh:
+    iq.1.md     -- man-page in markdown for 'iq'
+    iq+.1.md    -- man-page in markdown for 'iq+'
+    example1.sh -- script to demonstrate use of iq/iq+ in scripts
+    iq4sh.spec  -- example RPM spec file for packaging iq/iq+
+
